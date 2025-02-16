@@ -1,4 +1,7 @@
 import requests  
+from utils.read_api_keys import read_api_keys
+
+API_KEYS = read_api_keys("./secrets.json")
 
 def obtener_partidos_jornada(competicion_id, temporada, jornada):  
     # Define la URL de la API para obtener los partidos de la competición específica  
@@ -6,7 +9,7 @@ def obtener_partidos_jornada(competicion_id, temporada, jornada):
     
     # Define los headers, incluyendo la clave de API  
     headers = {  
-        'X-Auth-Token': 'TU_CLAVE_DE_API'  # Reemplaza con tu clave de API  
+        'X-Auth-Token':  API_KEYS["FOOTBALL-DATA_API_KEY"] # Reemplaza con tu clave de API  
     }  
     
     # Define los parámetros de la solicitud  
@@ -41,11 +44,8 @@ def obtener_partidos_jornada(competicion_id, temporada, jornada):
 
 # Ejemplo de uso  
 competicion_id = "PL"  # ID de la competición (ejemplo: Premier League)  
-temporada = "2024"  # Temporada  
+temporada = "2023"  # Temporada  
 jornada = 23  # Jornada  
 
 partidos = obtener_partidos_jornada(competicion_id, temporada, jornada)  
-
-# Imprimir los resultados  
-for partido in partidos:  
-    print(f"{partido['equipo_local']} vs {partido['equipo_visitante']} - Fecha: {partido['fecha']} - Estado: {partido['estado']}")
+print(partidos)
