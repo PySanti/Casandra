@@ -80,3 +80,5 @@ En producción se unirán los módulos **MatchLister**, **MatchScrapper** y **Ca
 
 * PPCV: promedio de puntos de los últimos partidos de visitante en la competición
 
+
+(enfrentamiento directo)
