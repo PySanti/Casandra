@@ -68,6 +68,11 @@ En producción se unirán los módulos **MatchLister**, **MatchScrapper** y **Ca
 
 * visitante (categórica)
 
+* ranking fifa del local en el momento del partido
+
+* ranking fifa del visitante en el momento del partido
+
+* ranking del estadio
 
 
 ## Rendimiento Reciente
