@@ -6,44 +6,39 @@
 
 La premisa principal de Casandra será **aprovechar el poder del machine learning para predecir resultados y total de goles en partidos de fútbol**.
 
-**Casandra** es el nombre que recibirá el meta-modelo predictor.
-
 No espero un sistema perfecto, ya que, evidentemente, siempre hay un factor de aleatoriedad en los partidos de fútbol. Sin embargo, la gran mayoría de los partidos tienden a ajustarse a su resultado más probable.
 
-**Casandra** será entrenada usando todos los partidos de todas las jornadas de las principales competiciones de las 5 principales ligas europeas de los últimos 10 años, dando un total de aproximadamente 25.000 partidos.
+**Casandra** será entrenada utilizando todos los partidos de todas las jornadas de las 5 principales ligas europeas de los ultimos 30 anios. Por lo tanto, los primeros datos se corresponderan a la jornada 5 de la temporada 94/95.
 
 ## Requerimientos
 
-El objetivo es construir una aplicación de terminal que, al ejecutarse, muestre una lista con las 5 principales ligas europeas, copas ligueras y Champions, y al seleccionarse la competición deseada, *el programa mostrara una lista con todos los partidos de la próxima jornada junto con su resultado más probable y total de goles más probable*.
+El objetivo es construir una aplicación de terminal que, al ejecutarse, muestre una lista con las 5 principales ligas europeas, y al seleccionarse la competición deseada, *el programa mostrara una lista con todos los partidos de la próxima jornada junto con su resultado más probable y total de goles más probable* ordenando los resultados de mayor a menor seguridad.
 
-La premisa de este proyecto será crear dos **meta-modelos** de machine learning capaces de realizar predicciones de partidos de fútbol, uno para resultado más probable (Clasificación) y otro para la cantidad de goles más probables (Regresión). Ambos constituirán a **Casandra**.
-
-Ambos meta-modelos seguirán el concepto de *stacking* en el contexto de *ensemble learning* utilizando la mayor cantidad de algoritmos de machine learning y deep learning, esto para lograr los mejores resultados posibles.
-
+Se utilizara (en principio) el algoritmo de machine learning que recibe el nombre de Support Vector Machine (SVM) dadas las caracteristicas del dataset. 
 
 # Fases del proyecto
 
 ## 1- Conseguir datos
 
-
 * Definir lista de features.
 
-* Crear una función que reciba competición, temporada y jornada y retorne la lista de partidos. (**MatchLister**)
+* Crear una funcion (get_match_features) que reciba el acronimo de un partido (bar-get) y su fecha, y retorne todas las features de dicho partido. Esta funcion debe ser utilizada para encontrar datos de partidos terminados y no terminados, es decir, tambien retornaria el resultado del encuentro en caso de estar disponible.
 
-* Crear una función que, dado un partido, retorne los últimos 10 partidos de cada uno de los equipos: enfrentamiento y fecha.
-(**MatchPreviewer**)
 
-* Crear una función que, dados los últimos 10 partidos de un equipo, retorne las features requeridas.
+* Crear funcion (get_previes_matches) que reciba un equipo y una fecha y retorne los N partidos previos a esa fecha con el formato : 
 
-* Crear una función que, dado un partido, retorne los últimos 10 enfrentamientos entre los dos equipos en caso de que haya por lo menos 10, en caso contrario simplemente retornar lo que haya. Enfrentamiento y fecha.
+[
+    ['bar-sev', 'dd/mm/aa'],
+    ['vill-bar', 'dd/mm/aa'],
+    ...
+]
 
-* Crear una función que, dado los últimos enfrentamientos entre los equipos, retorne los valores para las features requeridas.
+* Crear funcion (get_match_result) que dado un partido retorne su resultado.
 
-* Crear función que, dado un partido y una fecha, retorne los valores para las features seleccionadas y el resultado y goles totales en caso de estar definidos. (**MatchScrapper**)
+* Crear funcion (get_elo) que dado un equipo y una fecha retorne su ELO en esa fecha.
 
-* Crear una función que, dado el nombre de un jugador, retorne su valor de mercado.
+* Crear funcion (get_team_value) que dado un equipo y una fecha retorne el valor de mercado total de la plantilla en ese momento.
 
-* Unir ambas funciones anteriores para crear un dataframe y exportar.
 
 ## 2 - Entrenamiento de Casandra
 
@@ -51,14 +46,15 @@ Una vez obtenidos los datos, se entrenará Casandra.
 
 ## 3 - Juntar módulos para producción
 
-En producción se unirán los módulos **MatchLister**, **MatchScrapper** y **Casandra** para cumplir con los requisitos.
+...
+
 
 
 
 ## 4 - Pruebas con casos reales
 
 
-# Selección de features
+# Ideas generales de features
 
 ## General
 
@@ -153,3 +149,55 @@ I_P: un número del 1 al 3 que represente la importancia del partido, si es una 
 
 
 
+# Lista de features primaria
+
+En principio, utilizare las features mas destacadas para evitar ruido y colinealidad. En un futuro pensare si poner mas.
+
+## Identidad / contexto
+
+Local (categórica) → codificada.
+
+Visitante (categórica) → igual que arriba.
+
+Competicion (categorica)
+
+
+## Fuerza global
+
+Ranking Elo/FIFA local
+
+Ranking Elo/FIFA visitante
+
+## Forma reciente (últimos 5 partidos)
+
+PGML: promedio goles marcados local
+
+PGEL: promedio goles encajados local
+
+PGMV: promedio goles marcados visitante
+
+PGEV: promedio goles encajados visitante
+
+
+## Resultados recientes
+
+PPL: puntos promedio últimos 5 del local
+
+PPV: puntos promedio últimos 5 del visitante
+
+
+## Contexto físico / externo
+
+DD_L: días descanso local
+
+DD_V: días descanso visitante
+
+
+## Valor de mercado
+
+VMTL: valor mercado total local
+
+VMTV: valor mercado total visitante
+
+
+Total de features inicial : 15
