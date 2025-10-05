@@ -33,11 +33,17 @@ Se utilizara (en principio) el algoritmo de machine learning que recibe el nombr
     ...
 ]
 
-* Crear funcion (get_match_result) que dado un partido retorne su resultado.
+* Crear funcion (get_match_result) que dado un partido y su fecha retorne su resultado.
 
 * Crear funcion (get_elo) que dado un equipo y una fecha retorne su ELO en esa fecha.
 
 * Crear funcion (get_team_value) que dado un equipo y una fecha retorne el valor de mercado total de la plantilla en ese momento.
+
+* Crear clase `Match`, que contendra toda la informacion asociada a un partido.
+
+* Crear clase `Result` que contendra informacion acerca de los resultados previos a un partido.
+
+* Crear funcion (get_matches_list) que reciba una liga, temporada y jornada y retorne la lista de partidos (formato: ([codigo],[fecha]) ).
 
 
 ## 2 - Entrenamiento de Casandra
@@ -47,9 +53,6 @@ Una vez obtenidos los datos, se entrenará Casandra.
 ## 3 - Juntar módulos para producción
 
 ...
-
-
-
 
 ## 4 - Pruebas con casos reales
 
