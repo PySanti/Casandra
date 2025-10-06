@@ -25,7 +25,7 @@ Se utilizara (en principio) el algoritmo de machine learning que recibe el nombr
 * Crear una funcion (get_match_features) que reciba el acronimo de un partido (bar-get) y su fecha, y retorne todas las features de dicho partido. Esta funcion debe ser utilizada para encontrar datos de partidos terminados y no terminados, es decir, tambien retornaria el resultado del encuentro en caso de estar disponible.
 
 
-* Crear funcion (get_previes_matches) que reciba un equipo y una fecha y retorne los N partidos previos a esa fecha con el formato : 
+* Crear funcion (get_previus_matches) que reciba un equipo y una fecha y retorne los N partidos previos a esa fecha con el formato : 
 
 [
     ['bar-sev', 'dd/mm/aa'],
