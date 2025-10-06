@@ -176,6 +176,7 @@ def _from_worldfootball(liga: str, temporada: int, jornada: int, debug=False) ->
 
     out: List[Tuple[str, str]] = []
     for table in tables:
+        print(tables)
         for tr in table.select("tr"):
             tds = tr.find_all("td")
             if len(tds) < 3:
@@ -235,9 +236,10 @@ def get_matches_list(liga: str, temporada: int, jornada: int, debug: bool=False)
         raise ValueError("La jornada debe ser un entero >= 1.")
 
     # 1) FBref (primario)
-    res = _from_fbref(key, temporada, jornada, debug=debug)
-    if res:
-        return res
-
-    # 2) worldfootball (respaldo; puede devolver [] si hay 403)
-    return _from_worldfootball(key, temporada, jornada, debug=debug)
+    try:
+        res = _from_fbref(key, temporada, jornada, debug=debug)
+        if res:
+            return res
+    except:
+        # 2) worldfootball (respaldo; puede devolver [] si hay 403)
+        return _from_worldfootball(key, temporada, jornada, debug=debug)
