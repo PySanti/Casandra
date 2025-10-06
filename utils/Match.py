@@ -1,4 +1,5 @@
 class Match:
+
     def __init__(self,date, local, away, comp, local_elo, away_elo) -> None:
         self.date = date
         self.local = local
