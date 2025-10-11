@@ -1,49 +1,57 @@
+from utils.get_elo import get_team_elo
+from datetime import datetime
+from utils.get_match_result import get_match_result
+from utils.get_previews_matches import get_previus_matches
+from utils.get_team_value import get_team_value
+from utils.CONSTANTS import LOCAL, AWAY, PREVIUS_MATCHES_CONSIDERED
+
+
+
 class Match:
 
-    def __init__(self,date, local, away, comp, local_elo, away_elo) -> None:
+    def __init__(self,slug, date,  comp, local_data, away_data) -> None:
+        self.match_slug = slug
         self.date = date
-        self.local = local
-        self.away = away
         self.comp = comp
-        self.local_elo = local_elo
-        self.away_elo = away_elo
-        self.local_previus_results = []
-        self.away_previus_results = []
+        self.teams_data = [local_data,away_data]
 
-        # recent avg goals, local
-        self.pgml = None
-
-        # recent avg conceeded goals, local
-        self.pgel = None
-
-        # recent avg goals, away
-        self.pgmv = None
-
-        # recent avg conceeded goals, away
-        self.pgev = None
-
-        # recent avg points (3 for win, 1 for draw, 0 for loss) local
-        self.ppl = None
-
-        # recent avg points (3 for win, 1 for draw, 0 for loss) away
-        self.ppv = None
-
-        # resting days local
-        self.dd_l = None
-
-        # resting days away
-        self.dd_v = None
-
-        # market value local
-        self.vmtl = None
-
-        # market value away
-        self.vmtv = None
-
-
-        # if available
-        self.local_goals = None
-        self.away_goals = None
+    def set_teams_elo(self):
+        for team in self.teams_data:
+            team.elo = get_team_elo(team.slug, self.date, debug=True)
 
     def set_performance_data(self):
-        pass
+        for team in self.teams_data:
+            team.previus_results = get_previus_matches(team.slug, self.date, PREVIUS_MATCHES_CONSIDERED, debug=True)
+            team.set_previus_performance()
+
+    def set_resting_days(self):
+        for team in self.teams_data:
+            team.dd = int((datetime.strptime(self.date, "%d/%m/%y") - team.previus_results[0].date).days)
+
+    def set_match_result(self):
+        if match_result:=get_match_result(self.match_slug, self.date, self.comp, debug=True):
+            self.teams_data[LOCAL].scored_goals = match_result.local_goals
+            self.teams_data[AWAY].scored_goals = match_result.away_goals
+
+    def set_teams_value(self):
+        for team in self.teams_data:
+            team.vmt = get_team_value(team.slug, self.date, debug=True)
+
+
+
+    def __str__(self):
+        return f"""
+
+        Match : {self.match_slug}
+        Date : {self.date}
+        Competition : {self.comp}
+
+
+                Local   
+            {self.teams_data[LOCAL]}
+
+
+                Away   
+            {self.teams_data[AWAY]}
+
+        """
