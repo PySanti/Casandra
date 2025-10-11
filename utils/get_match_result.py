@@ -193,7 +193,7 @@ def get_match_result(slug: str, fecha: str, liga_hint = None,
                 score = score_td.get_text(strip=True)
                 score = re.sub(r"\s*–\s*", "-", score)
                 if debug: print(f"[FOUND] {key.upper()} {season_str} {h}-{a} {score}")
-                return Result(*slug.split('-'),*score.split('-'))
+                return Result(*slug.split('-'),*score.split('-'), datetime.strptime(fecha, "%d/%m/%y"))
 
         if debug and found_same_day:
             print(f"[HINT] Hubo partidos en {key} ±{search_window_days} días, pero no coincidió el slug.")

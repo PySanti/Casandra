@@ -7,6 +7,8 @@ class Match:
         self.comp = comp
         self.local_elo = local_elo
         self.away_elo = away_elo
+        self.local_previus_results = []
+        self.away_previus_results = []
 
         # recent avg goals, local
         self.pgml = None
@@ -40,5 +42,8 @@ class Match:
 
 
         # if available
-        self.local_result = None
-        self.away_result = None
+        self.local_goals = None
+        self.away_goals = None
+
+    def set_performance_data(self):
+        pass

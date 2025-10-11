@@ -5,6 +5,7 @@ import random
 from datetime import datetime, timedelta
 from typing import List, Tuple, Optional
 import unicodedata
+from utils.Result import Result
 
 import requests
 import requests_cache
@@ -132,54 +133,179 @@ def _robust_get(url: str, max_retries=5, base_delay=1.5, debug=False) -> request
         return r
     raise RuntimeError(f"Max retries alcanzado para {url}")
 
-# ---- Principal ----
-def get_previus_matches(slug_equipo: str, fecha: str, X: int, debug: bool=False) -> List[Tuple[str, str]]:
+
+def get_previus_matches(slug_equipo: str, fecha: str, X: int, debug: bool=False) -> List[Result]:
     """
-    Retorna los X resultados previos (antes de 'fecha') para el equipo dado.
-    Formato: [( 'home-away', 'gH-gA' ), ...]
-      - 'home-away' usa los slugs normalizados (3 letras aprox) por cada equipo.
-      - 'gH-gA' respeta el orden home-away (tal como aparece en FBref).
-    NOTA: Busca en la liga doméstica más probable (top-5). Si no reconoce la liga del equipo, intenta todas.
+    Retorna los X resultados previos (antes de 'fecha' dd/mm/aa) del equipo (slug corto)
+    en TODAS las competiciones, usando la página de 'Scores & Fixtures' del equipo en FBref.
+
+    Salida: List[Result] con:
+        Result(home_slug, away_slug, gH, gA, date_obj)
     """
-    # Validaciones
+    # --- Validaciones ---
     if not isinstance(X, int) or X <= 0:
         raise ValueError("X debe ser un entero > 0.")
+    X = min(X, 10)  # tope solicitado
+
     try:
-        d = datetime.strptime(fecha, "%d/%m/%y")
+        d_cut = datetime.strptime(fecha, "%d/%m/%y")
     except ValueError:
-        raise ValueError("La fecha debe ser dd/mm/aa (ej. '30/09/95').")
+        raise ValueError("La fecha debe ser dd/mm/aa (ej. '30/09/25').")
 
-    # Temporada FBref
-    temporada = d.year if d.month >= 7 else d.year - 1
-    season_str = f"{temporada}-{temporada+1}"
-
-    # Slug objetivo
     target = slugify_team(slug_equipo)
 
-    # Orden de ligas a consultar
-    leagues_order = guess_leagues_for_slug(target)
+    # Temporada "año-año+1" según tu lógica (cambia de temporada en julio)
+    temporada_base = d_cut.year if d_cut.month >= 7 else d_cut.year - 1
 
     parser = _pick_parser()
-    collected: List[Tuple[datetime, str, str]] = []  # (date, 'home-away', 'gH-gA')
 
-    for key in leagues_order:
-        comp_id, comp_slug = COMP_MAP[key]
-        url = f"https://fbref.com/en/comps/{comp_id}/{season_str}/schedule/{season_str}-{comp_slug}-Scores-and-Fixtures"
+    # ------------------------------------------------------------
+    # 1) Descubrir la URL base del equipo en FBref a partir de alguna liga probable
+    #    (tomamos el primer match de ese equipo en la tabla de la liga y leemos el href del <a>)
+    # ------------------------------------------------------------
+    def _find_team_base_url() -> Optional[str]:
+        leagues_order = guess_leagues_for_slug(target)
+        season_str = f"{temporada_base}-{temporada_base+1}"
+
+        for key in leagues_order:
+            comp_id, comp_slug = COMP_MAP[key]
+            url = f"https://fbref.com/en/comps/{comp_id}/{season_str}/schedule/{season_str}-{comp_slug}-Scores-and-Fixtures"
+            try:
+                r = _robust_get(url, debug=debug)
+            except Exception as e:
+                if debug: print(f"[error liga] {e}")
+                continue
+
+            soup = BeautifulSoup(r.text, parser)
+
+            # Algunas tablas vienen comentadas; función que itera tbody/tr de la primera tabla válida
+            def _iter_rows(s):
+                for tr in s.select("table tbody tr"):
+                    yield tr
+
+            rows = list(_iter_rows(soup))
+            if not rows:
+                # Buscar tablas dentro de comentarios
+                for c in soup.find_all(string=lambda t: isinstance(t, Comment) and "<table" in t):
+                    sub = BeautifulSoup(c, parser)
+                    rows = list(_iter_rows(sub))
+                    if rows:
+                        break
+
+            for tr in rows:
+                home_td = tr.find("td", {"data-stat": "home_team"})
+                away_td = tr.find("td", {"data-stat": "away_team"})
+                if not (home_td and away_td):
+                    continue
+
+                h_name = home_td.get_text(strip=True)
+                a_name = away_td.get_text(strip=True)
+                h = slugify_team(h_name)
+                a = slugify_team(a_name)
+
+                if h != target and a != target:
+                    continue
+
+                # Tomamos el link del equipo que coincida
+                td = home_td if h == target else away_td
+                a_tag = td.find("a", href=True)
+                if not a_tag:
+                    continue
+                href = a_tag["href"]  # típicamente "/en/squads/<TEAM_ID>/"
+                if href.startswith("/"):
+                    href = "https://fbref.com" + href
+                # Normalizamos a la URL base (sin temporada) para luego buscar "Scores & Fixtures"
+                # Si ya viene con temporada, igual la usamos como base.
+                return href
+        return None
+
+    team_base = _find_team_base_url()
+    if not team_base:
+        if debug: print("[team] no hallado en ligas top-5; intentará todas igualmente.")
+        # Como fallback: intentar todas ligas (ya lo hace guess_leagues_for_slug); si no, no hay forma estable de deducir URL
+        return []
+
+    # ------------------------------------------------------------
+    # 2) Hallar la(s) URL(s) de "Scores & Fixtures" para el equipo y temporadas relevantes
+    #    Preferimos la temporada_base y, si no completamos X, miramos temporadas anteriores.
+    # ------------------------------------------------------------
+    def _find_scores_fixtures_urls(team_root_url: str, seasons: List[int]) -> List[str]:
+        """
+        Dado el root del equipo (/en/squads/<id>/ o una subpágina), localiza los enlaces
+        a 'Scores & Fixtures' para las temporadas solicitadas (más reciente primero).
+        """
+        urls = []
+        # Primero, si la URL ya es de temporada y contiene 'Scores and Fixtures', úsala directamente.
+        # Si no, abrimos la base y buscamos enlaces.
         try:
-            r = _robust_get(url, debug=debug)
+            r = _robust_get(team_root_url, debug=debug)
         except Exception as e:
-            if debug: print(f"[error] {e}")
-            continue
+            if debug: print(f"[team_root error] {e}")
+            return urls
 
         soup = BeautifulSoup(r.text, parser)
 
+        # Buscar enlaces que apunten a 'Scores and Fixtures' (texto o href) y contengan la temporada
+        a_tags = soup.find_all("a", href=True)
+        hrefs = [(a.get_text(strip=True), a["href"]) for a in a_tags]
+
+        def _to_abs(h: str) -> str:
+            return "https://fbref.com" + h if h.startswith("/") else h
+
+        for year in seasons:
+            season_str = f"{year}-{year+1}"
+            # Heurísticas: texto "Scores & Fixtures" o "Scores and Fixtures", y/o href con 'matchlogs'/'schedule'
+            cand = None
+            for text, h in hrefs:
+                txt = (text or "").lower()
+                if "scores" in txt and "fixture" in txt and season_str in h:
+                    cand = _to_abs(h); break
+                if season_str in h and ("matchlogs" in h or "schedule" in h):
+                    cand = _to_abs(h); break
+            if cand:
+                urls.append(cand)
+
+        # Si no encontró nada con temporada explícita, como fallback toma el primer "Scores & Fixtures"
+        if not urls:
+            for text, h in hrefs:
+                txt = (text or "").lower()
+                if "scores" in txt and "fixture" in txt:
+                    urls.append(_to_abs(h))
+                    break
+
+        return urls
+
+    # Intentamos temporada base y vamos retrocediendo hasta reunir X (por ejemplo, 5 temporadas máx)
+    seasons_to_try = [temporada_base - i for i in range(0, 6)]  # base, base-1, ..., base-5
+    team_sf_urls = _find_scores_fixtures_urls(team_base, seasons_to_try)
+    if not team_sf_urls:
+        # A veces la base ya es una página de temporada; probamos directo un patrón adicional:
+        # No forzamos patrón fijo para evitar romper si FBref cambia; respetamos heurística anterior.
+        if debug: print("[scores&fixtures] no encontrado")
+        return []
+
+    # ------------------------------------------------------------
+    # 3) Parsear cada tabla de 'Scores & Fixtures' (todas las comps) y recolectar previos a d_cut
+    # ------------------------------------------------------------
+    collected: List[Tuple[datetime, str, str]] = []  # (date, 'home-away', 'gH-gA')
+
+    def _parse_scores_fixtures(url: str):
+        nonlocal collected
+        try:
+            r = _robust_get(url, debug=debug)
+        except Exception as e:
+            if debug: print(f"[sf error] {e} @ {url}")
+            return
+
+        soup = BeautifulSoup(r.text, parser)
+
+        # Función genérica para capturar rows
         def _iter_rows(s):
             for tr in s.select("table tbody tr"):
                 yield tr
 
         rows = list(_iter_rows(soup))
         if not rows:
-            # tablas envueltas en comentarios
             for c in soup.find_all(string=lambda t: isinstance(t, Comment) and "<table" in t):
                 sub = BeautifulSoup(c, parser)
                 rows = list(_iter_rows(sub))
@@ -187,47 +313,71 @@ def get_previus_matches(slug_equipo: str, fecha: str, X: int, debug: bool=False)
                     break
 
         for tr in rows:
+            date_td = tr.find("td", {"data-stat": "date"})
             home_td = tr.find("td", {"data-stat": "home_team"})
             away_td = tr.find("td", {"data-stat": "away_team"})
-            date_td = tr.find("td", {"data-stat": "date"})
             score_td = tr.find("td", {"data-stat": "score"})
-            if not (home_td and away_td and date_td and score_td):
+            if not (date_td and home_td and away_td and score_td):
                 continue
 
-            # Fecha fila
+            # Fecha
             raw = (date_td.get_text(strip=True) or "")[:10]
             try:
                 mdate = datetime.strptime(raw, "%Y-%m-%d")
             except Exception:
                 continue
 
-            # Solo partidos ANTES de la fecha dada (estricto)
-            if not (mdate < d):
-                continue
+            if not (mdate < d_cut):
+                continue  # solo previos
 
+            # Equipos
             h_name = home_td.get_text(strip=True)
             a_name = away_td.get_text(strip=True)
             h = slugify_team(h_name)
             a = slugify_team(a_name)
 
-            # ¿Participa el equipo?
+            # Confirma que uno de los dos es nuestro equipo objetivo (por si la página mezcla cosas)
             if h != target and a != target:
                 continue
 
+            # Marcador
             score = score_td.get_text(strip=True)
             if not score:
-                # partido sin marcador (TBD) → omitir
                 continue
-            score = re.sub(r"\s*–\s*", "-", score)  # “–” → “-”
-            match_slug = f"{h}-{a}"
-            collected.append((mdate, match_slug, score))
+            score = re.sub(r"\s*–\s*", "-", score)  # normaliza guion
+            # Evitar filas tipo "Postp" o sin formato "x-y"
+            if not re.match(r"^\d+\s*-\s*\d+$", score):
+                continue
 
-        # Si ya tenemos suficientes, no hace falta consultar más ligas
+            collected.append((mdate, f"{h}-{a}", score))
+
+    # Parseamos urls en orden (más recientes primero según cómo las encontramos)
+    for u in team_sf_urls:
+        _parse_scores_fixtures(u)
         if len(collected) >= X:
             break
 
-    # Ordenar por fecha descendente y cortar a X
+    # Si aún no alcanza X, intenta temporadas anteriores adicionales (si no estaban ya en team_sf_urls)
+    if len(collected) < X:
+        extra_years = [y for y in seasons_to_try if all(str(y) not in u for u in team_sf_urls)]
+        for y in extra_years:
+            # Re-descubrir URL de esa temporada concreta (por si faltó)
+            more_urls = _find_scores_fixtures_urls(team_base, [y])
+            for u in more_urls:
+                _parse_scores_fixtures(u)
+                if len(collected) >= X:
+                    break
+            if len(collected) >= X:
+                break
+
+    # ------------------------------------------------------------
+    # 4) Ordenar desc por fecha y cortar a X → construir Result
+    # ------------------------------------------------------------
     collected.sort(key=lambda t: t[0], reverse=True)
-    out = [(slug, score) for _, slug, score in collected[:X]]
+    out: List[Result] = []
+    for date_obj, match_slug, score in collected[:X]:
+        h_slug, a_slug = match_slug.split("-")
+        gH, gA = score.split("-")
+        out.append(Result(h_slug, a_slug, gH, gA, date_obj))
     return out
 

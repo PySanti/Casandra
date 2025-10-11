@@ -51,7 +51,11 @@ Se utilizará (en principio) el algoritmo de machine learning que recibe el nomb
 
 * Crear función (get_matches_list) que reciba una liga, temporada y jornada y retorna la lista de partidos (formato: ([código],[fecha]) ).
 
-* Crear una función (get_match_features) que reciba el acrónimo de un partido (bar-get) y su fecha, y retorna todas las features de dicho partido. Esta función debe ser utilizada para encontrar datos de partidos terminados y no terminados, es decir, también retorna el resultado del encuentro en caso de estar disponible.
+* Crear una función (get_match_features) que reciba el acrónimo de un partido (bar-get) y su fecha, y retorna todas las features de dicho partido. Esta función debe ser utilizada para encontrar datos de partidos terminados y no terminados, es decir, también retorna el resultado del encuentro en caso de estar disponible. Esta funcion debe:
+
+    1. Retornar ultimos X resultados del equipo con resultado, slug y fecha.
+    2. Deben ser resultados que involucren todas las competiciones
+    3. La consulta no debe ser lenta ni ser potencialmente baneada
 
 * Dadas las funcionalidades anteriores, crear script para minado de data.
 
