@@ -3,4 +3,4 @@ from utils.get_elo import get_team_elo
 from utils.get_previews_matches import get_previus_matches
 
 
-print(get_team_value('bar', '6/10/10', debug=True))
+print(get_team_value('ovi', '31/12/24', debug=True))

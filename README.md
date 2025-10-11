@@ -8,13 +8,13 @@ La premisa principal de Casandra será **aprovechar el poder del machine learnin
 
 No espero un sistema perfecto, ya que, evidentemente, siempre hay un factor de aleatoriedad en los partidos de fútbol. Sin embargo, la gran mayoría de los partidos tienden a ajustarse a su resultado más probable.
 
-**Casandra** será entrenada utilizando todos los partidos de todas las jornadas de las 5 principales ligas europeas de los ultimos 30 anios. Por lo tanto, los primeros datos se corresponderan a la jornada 5 de la temporada 94/95.
+**Casandra** será entrenada utilizando todos los partidos de todas las jornadas de las 5 principales ligas europeas de los últimos 30 años. Por lo tanto, los primeros datos se corresponden a la jornada 5 de la temporada 94/95.
 
 ## Requerimientos
 
-El objetivo es construir una aplicación de terminal que, al ejecutarse, muestre una lista con las 5 principales ligas europeas, y al seleccionarse la competición deseada, *el programa mostrara una lista con todos los partidos de la próxima jornada junto con su resultado más probable y total de goles más probable* ordenando los resultados de mayor a menor seguridad.
+El objetivo es construir una aplicación de terminal que, al ejecutarse, muestre una lista con las 5 principales ligas europeas, y al seleccionarse la competición deseada, *el programa mostrará una lista con todos los partidos de la próxima jornada junto con su resultado más probable y total de goles más probable* ordenando los resultados de mayor a menor seguridad.
 
-Se utilizara (en principio) el algoritmo de machine learning que recibe el nombre de Support Vector Machine (SVM) dadas las caracteristicas del dataset. 
+Se utilizará (en principio) el algoritmo de machine learning que recibe el nombre de Support Vector Machine (SVM) dadas las características del dataset. 
 
 # Fases del proyecto
 
@@ -22,7 +22,7 @@ Se utilizara (en principio) el algoritmo de machine learning que recibe el nombr
 
 * Definir lista de features.
 
-* Crear una funcion (get_match_features) que reciba el acronimo de un partido (bar-get) y su fecha, y retorne todas las features de dicho partido. Esta funcion debe ser utilizada para encontrar datos de partidos terminados y no terminados, es decir, tambien retornaria el resultado del encuentro en caso de estar disponible.
+* Crear una función (get_match_features) que reciba el acrónimo de un partido (bar-get) y su fecha, y retorna todas las features de dicho partido. Esta función debe ser utilizada para encontrar datos de partidos terminados y no terminados, es decir, también retorna el resultado del encuentro en caso de estar disponible.
 
 
 * Crear funcion (get_previus_matches) que reciba un equipo y una fecha y retorne los N partidos previos a esa fecha con el formato : 
@@ -33,17 +33,23 @@ Se utilizara (en principio) el algoritmo de machine learning que recibe el nombr
     ...
 ]
 
-* Crear funcion (get_match_result) que dado un partido y su fecha retorne su resultado.
+* Crear función (get_match_result) que dado un partido y su fecha retorne su resultado.
 
-* Crear funcion (get_elo) que dado un equipo y una fecha retorne su ELO en esa fecha.
+* Crear función (get_elo) que dado un equipo y una fecha retorne su ELO en esa fecha.
 
-* Crear funcion (get_team_value) que dado un equipo y una fecha retorne el valor de mercado total de la plantilla en ese momento.
+* Crear función (get_team_value) que dado un equipo y una fecha retorna el valor de mercado total de la plantilla en ese momento. Se considerará tener en cuenta la inflación europea de la fecha. Esta funcion debera ser capaz de:
 
-* Crear clase `Match`, que contendra toda la informacion asociada a un partido.
+    1. Retornar el valor de mercado para cualquier equipo que actualmente este en 1ra/2da/3ra division en las 5 principales ligas europeas.
+    2. Retornar el valor de mercado para cualquier fecha entre 1994 y 2025
+    3. Retornar el valor de mercado ajustado a la inflacion del momento.
 
-* Crear clase `Result` que contendra informacion acerca de los resultados previos a un partido.
+    Nota: recordar que cuando se haga el proceso de minado de data, se deben cachear los team_values por temporada.
 
-* Crear funcion (get_matches_list) que reciba una liga, temporada y jornada y retorne la lista de partidos (formato: ([codigo],[fecha]) ).
+* Crear clase `Match`, que contendrá toda la información asociada a un partido.
+
+* Crear clase `Result` que contendrá información acerca de los resultados previos a un partido.
+
+* Crear función (get_matches_list) que reciba una liga, temporada y jornada y retorna la lista de partidos (formato: ([código],[fecha]) ).
 
 
 ## 2 - Entrenamiento de Casandra
@@ -69,17 +75,17 @@ Una vez obtenidos los datos, se entrenará Casandra.
 
 * jornada
 
-## Rendimiento general en la competicion
+## Rendimiento general en la competición
 
-* PA : posicion actual en la competicion. En caso de ser un partido de eliminatorias, a ambos se les asigna un 0.
+* PA : posición actual en la competición. En caso de ser un partido de eliminatorias, a ambos se les asigna un 0.
 
-* TGACL : total de goles anotados por el local en la competicion.
+* TGACL : total de goles anotados por el equipo local en la competición.
 
-* TGECL : total de goles encajados por el local en la competicion.
+* TGECL : total de goles encajados por el local en la competición.
 
-* TGACV : total de goles anotados por el visitante en la competicion.
+* TGACV : total de goles anotados por el equipo visitante en la competición.
 
-* TGECV : total de goles encajados por el visitante en la competicion.
+* TGECV : total de goles encajados por el equipo visitante en la competición.
 
 * PPLCL : promedio de puntos del local como local.
 
@@ -166,9 +172,9 @@ Una vez obtenidos los datos, se entrenará Casandra.
 
 ## Dias de descanso
 
-* DD_L: dias de descanso desde el último partido del local.
+* DD_L: días de descanso desde el último partido del local.
 
-* DD_V: dias de descanso desde el último partido del visitante.
+* DD_V: días de descanso desde el último partido del visitante.
 
 ## Cantidad de partidos
 
@@ -184,7 +190,7 @@ Una vez obtenidos los datos, se entrenará Casandra.
 
 # Lista de features primaria
 
-En principio, utilizare las features mas destacadas para evitar ruido y colinealidad. En un futuro pensare si poner mas.
+En principio, utilizaré las features más destacadas para evitar ruido y colinealidad. En un futuro pensaré si poner más.
 
 ## Identidad / contexto
 
@@ -192,7 +198,7 @@ Local (categórica) → codificada.
 
 Visitante (categórica) → igual que arriba.
 
-Competicion (categorica)
+Competición (categoría)
 
 
 ## Fuerza global
@@ -236,4 +242,4 @@ VMTV: valor mercado total visitante
 Total de features inicial : 15
 
 
-
+# Minado de data
