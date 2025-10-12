@@ -8,7 +8,7 @@ def get_match_features(slug, date, ligue):
                   TeamData(away_team),
         )
     match.set_teams_elo()
-    match.set_match_result()
+    #match.set_match_result()
     match.set_teams_value()
     match.set_performance_data()
     match.set_resting_days()

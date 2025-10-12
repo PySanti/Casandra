@@ -5,6 +5,7 @@ import random
 from datetime import datetime, timedelta
 from typing import List, Tuple, Optional
 import unicodedata
+from urllib.parse import quote
 from utils.Result import Result
 
 import requests
@@ -14,7 +15,7 @@ from bs4 import BeautifulSoup, Comment
 # ---- Cache 24h para no repetir peticiones ----
 requests_cache.install_cache("fb_cache", expire_after=86400)
 
-# ---- Competencias soportadas (top-5) ----
+# ---- (Opcional) Mapa de competencias top-5 (no se usa en esta versión, pero lo dejamos por compat) ----
 COMP_MAP = {
     "laliga": ("12", "La-Liga"),
     "premier": ("9", "Premier-League"),
@@ -86,10 +87,9 @@ def slugify_team(name: str) -> str:
     }
     return aliases.get(cleaned, cleaned[:3] if len(cleaned) >= 3 else cleaned)
 
-# ---- Deducción de liga probable por slug de equipo (para reducir 429) ----
+# ---- Deducción de liga probable por slug (se deja por compat, no se usa en esta versión) ----
 def guess_leagues_for_slug(team_slug: str) -> List[str]:
     s = team_slug.lower()
-    # Grupos rápidos por códigos típicos
     if s in {"bar","rma","sev","atm","val","vil","bet","gir","get","soc","ath","osa","cel","ray","lpa","ala","gra","rvad","mlr","cad","leg","spo"}:
         return ["laliga"]
     if s in {"liv","che","ars","mci","mun","tot","new","whu","avl","eve","lei","bha","bre","bou","cry","ful","wol","for","ips","sou"}:
@@ -100,19 +100,37 @@ def guess_leagues_for_slug(team_slug: str) -> List[str]:
         return ["bundesliga"]
     if s in {"psg","om","lyo","mon","lil","nic","ren","nan","monp","gir","rcl","rcs","tou","rei"}:
         return ["ligue1"]
-    # Si no se reconoce, intentar todas (orden moderado)
     return ["laliga", "premier", "seriea", "bundesliga", "ligue1"]
 
-# ---- GET robusto con Retry-After / backoff ----
-def _robust_get(url: str, max_retries=5, base_delay=1.5, debug=False) -> requests.Response:
+# ---- Rate limit local para evitar 429 ----
+_LAST_CALL_TS = 0.0
+_MIN_INTERVAL = 1.1  # segundos entre requests; puedes ajustar 0.7–1.5
+def _polite_pause():
+    global _LAST_CALL_TS
+    now = time.monotonic()
+    delta = _MIN_INTERVAL - (now - _LAST_CALL_TS)
+    if delta > 0:
+        time.sleep(delta + random.uniform(0, 0.15))
+    _LAST_CALL_TS = time.monotonic()
+
+# ---- GET robusto con caps de espera/presupuesto ----
+def _robust_get(url: str, max_retries=3, base_delay=1.5, max_wait=15, total_budget=30, debug=False) -> requests.Response:
+    """
+    GET con:
+      - rate limit local (_polite_pause)
+      - backoff con límite de espera por intento (max_wait) y presupuesto total (total_budget)
+      - respeta requests_cache si está habilitado
+    """
     s = requests.Session()
+    start = time.monotonic()
     for i in range(max_retries):
+        _polite_pause()
         r = s.get(url, headers=_headers(), timeout=25, allow_redirects=True)
         if debug:
             code = r.status_code
             from_cache = getattr(r, "from_cache", False)
             print(f"[FBref] {code} {'(cache)' if from_cache else ''} {url}")
-        if r.status_code == 429:
+        if r.status_code == 429 or (500 <= r.status_code < 600):
             ra = r.headers.get("Retry-After")
             if ra:
                 try:
@@ -121,19 +139,97 @@ def _robust_get(url: str, max_retries=5, base_delay=1.5, debug=False) -> request
                     wait = base_delay * (2 ** i) + random.uniform(0, 1.0)
             else:
                 wait = base_delay * (2 ** i) + random.uniform(0, 1.0)
-            if debug: print(f"[backoff] 429 -> sleep {wait:.1f}s")
-            time.sleep(wait)
-            continue
-        if 500 <= r.status_code < 600:
-            wait = base_delay * (2 ** i) + random.uniform(0, 1.0)
-            if debug: print(f"[backoff] {r.status_code} -> sleep {wait:.1f}s")
+            wait = min(wait, max_wait)
+            elapsed = time.monotonic() - start
+            if elapsed + wait > total_budget:
+                if debug:
+                    print(f"[backoff] presupuesto excedido ({elapsed:.1f}s + {wait:.1f}s) -> skip")
+                break
+            if debug:
+                print(f"[backoff] {r.status_code} -> sleep {wait:.1f}s")
             time.sleep(wait)
             continue
         r.raise_for_status()
         return r
-    raise RuntimeError(f"Max retries alcanzado para {url}")
+    raise RuntimeError(f"Max retries o presupuesto agotado para {url}")
 
+# ---- Resolución de URL del equipo vía buscador interno de FBref ----
+def _find_team_base_url_via_search(query: str, parser: str, debug: bool=False) -> Optional[str]:
+    """
+    Usa el buscador interno de FBref para dar con la URL base del equipo (/en/squads/<id>/...).
+    Generalmente 1 request; si el buscador redirige, r.url ya es la del equipo.
+    """
+    q = quote(query)
+    url = f"https://fbref.com/en/search/search.fcgi?search={q}"
+    try:
+        r = _robust_get(url, debug=debug)
+    except Exception as e:
+        if debug: print(f"[search error] {e}")
+        return None
 
+    # Si la búsqueda redirige directamente al equipo:
+    if "/en/squads/" in r.url:
+        return r.url
+
+    soup = BeautifulSoup(r.text, parser)
+    for a in soup.find_all("a", href=True):
+        h = a["href"]
+        # Evitar jugadores / matchlogs; preferir página raíz del equipo
+        if h.startswith("/en/squads/") and "/players/" not in h and "/matchlogs/" not in h:
+            return "https://fbref.com" + h
+    return None
+
+def _resolve_team_base_url(slug_equipo: str, target_slug: str, parser: str, debug: bool=False) -> Optional[str]:
+    """
+    Resuelve la URL base del equipo usando el buscador con distintas variantes del query.
+    No usa páginas de liga (evita 429 gigantes de /en/comps/...).
+    """
+    # 1) Intento con el slug tal cual (ej. 'bar')
+    by_search = _find_team_base_url_via_search(slug_equipo, parser, debug)
+    if by_search:
+        return by_search
+
+    # 2) Alias comunes por slug
+    reverse_alias = {
+        "bar": ["Barcelona", "FC Barcelona"],
+        "rma": ["Real Madrid", "Real Madrid CF"],
+        "sev": ["Sevilla", "Sevilla FC"],
+        "atm": ["Atlético de Madrid", "Atletico Madrid"],
+        "psg": ["Paris Saint-Germain", "PSG"],
+        "liv": ["Liverpool", "Liverpool FC"],
+        "che": ["Chelsea", "Chelsea FC"],
+        "mci": ["Manchester City", "Man City"],
+        "mun": ["Manchester United", "Man United"],
+        "bvb": ["Borussia Dortmund"],
+        "bay": ["Bayern Munich", "Bayern München", "FC Bayern"],
+        "juv": ["Juventus"],
+        "int": ["Inter", "Internazionale", "Inter Milan"],
+        "mil": ["AC Milan", "Milan"],
+        "nap": ["Napoli", "SSC Napoli"],
+        "rom": ["AS Roma", "Roma"],
+        "laz": ["Lazio", "SS Lazio"],
+    }
+    for q in reverse_alias.get(target_slug, []):
+        by_search = _find_team_base_url_via_search(q, parser, debug)
+        if by_search:
+            return by_search
+
+    # 3) Fallback: slug expandido como texto (p.ej., 'bar' -> 'barcelona')
+    slug_to_text = {
+        "bar": "barcelona",
+        "rma": "real madrid",
+        "sev": "sevilla",
+        "atm": "atletico madrid",
+    }
+    txt = slug_to_text.get(target_slug)
+    if txt:
+        by_search = _find_team_base_url_via_search(txt, parser, debug)
+        if by_search:
+            return by_search
+
+    return None
+
+# ---- Principal ----
 def get_previus_matches(slug_equipo: str, fecha: str, X: int, debug: bool=False) -> List[Result]:
     """
     Retorna los X resultados previos (antes de 'fecha' dd/mm/aa) del equipo (slug corto)
@@ -154,80 +250,21 @@ def get_previus_matches(slug_equipo: str, fecha: str, X: int, debug: bool=False)
 
     target = slugify_team(slug_equipo)
 
-    # Temporada "año-año+1" según tu lógica (cambia de temporada en julio)
+    # Temporada "año-año+1" (cambio en julio) — solo para ordenar búsqueda de temporadas
     temporada_base = d_cut.year if d_cut.month >= 7 else d_cut.year - 1
 
     parser = _pick_parser()
 
     # ------------------------------------------------------------
-    # 1) Descubrir la URL base del equipo en FBref a partir de alguna liga probable
-    #    (tomamos el primer match de ese equipo en la tabla de la liga y leemos el href del <a>)
+    # 1) Resolver URL base del equipo SIN usar páginas de liga
     # ------------------------------------------------------------
-    def _find_team_base_url() -> Optional[str]:
-        leagues_order = guess_leagues_for_slug(target)
-        season_str = f"{temporada_base}-{temporada_base+1}"
-
-        for key in leagues_order:
-            comp_id, comp_slug = COMP_MAP[key]
-            url = f"https://fbref.com/en/comps/{comp_id}/{season_str}/schedule/{season_str}-{comp_slug}-Scores-and-Fixtures"
-            try:
-                r = _robust_get(url, debug=debug)
-            except Exception as e:
-                if debug: print(f"[error liga] {e}")
-                continue
-
-            soup = BeautifulSoup(r.text, parser)
-
-            # Algunas tablas vienen comentadas; función que itera tbody/tr de la primera tabla válida
-            def _iter_rows(s):
-                for tr in s.select("table tbody tr"):
-                    yield tr
-
-            rows = list(_iter_rows(soup))
-            if not rows:
-                # Buscar tablas dentro de comentarios
-                for c in soup.find_all(string=lambda t: isinstance(t, Comment) and "<table" in t):
-                    sub = BeautifulSoup(c, parser)
-                    rows = list(_iter_rows(sub))
-                    if rows:
-                        break
-
-            for tr in rows:
-                home_td = tr.find("td", {"data-stat": "home_team"})
-                away_td = tr.find("td", {"data-stat": "away_team"})
-                if not (home_td and away_td):
-                    continue
-
-                h_name = home_td.get_text(strip=True)
-                a_name = away_td.get_text(strip=True)
-                h = slugify_team(h_name)
-                a = slugify_team(a_name)
-
-                if h != target and a != target:
-                    continue
-
-                # Tomamos el link del equipo que coincida
-                td = home_td if h == target else away_td
-                a_tag = td.find("a", href=True)
-                if not a_tag:
-                    continue
-                href = a_tag["href"]  # típicamente "/en/squads/<TEAM_ID>/"
-                if href.startswith("/"):
-                    href = "https://fbref.com" + href
-                # Normalizamos a la URL base (sin temporada) para luego buscar "Scores & Fixtures"
-                # Si ya viene con temporada, igual la usamos como base.
-                return href
-        return None
-
-    team_base = _find_team_base_url()
+    team_base = _resolve_team_base_url(slug_equipo, target, parser, debug)
     if not team_base:
-        if debug: print("[team] no hallado en ligas top-5; intentará todas igualmente.")
-        # Como fallback: intentar todas ligas (ya lo hace guess_leagues_for_slug); si no, no hay forma estable de deducir URL
+        if debug: print("[team] no hallado (search intentos).")
         return []
 
     # ------------------------------------------------------------
-    # 2) Hallar la(s) URL(s) de "Scores & Fixtures" para el equipo y temporadas relevantes
-    #    Preferimos la temporada_base y, si no completamos X, miramos temporadas anteriores.
+    # 2) Hallar URLs de 'Scores & Fixtures' para temporadas cercanas
     # ------------------------------------------------------------
     def _find_scores_fixtures_urls(team_root_url: str, seasons: List[int]) -> List[str]:
         """
@@ -235,8 +272,6 @@ def get_previus_matches(slug_equipo: str, fecha: str, X: int, debug: bool=False)
         a 'Scores & Fixtures' para las temporadas solicitadas (más reciente primero).
         """
         urls = []
-        # Primero, si la URL ya es de temporada y contiene 'Scores and Fixtures', úsala directamente.
-        # Si no, abrimos la base y buscamos enlaces.
         try:
             r = _robust_get(team_root_url, debug=debug)
         except Exception as e:
@@ -245,7 +280,6 @@ def get_previus_matches(slug_equipo: str, fecha: str, X: int, debug: bool=False)
 
         soup = BeautifulSoup(r.text, parser)
 
-        # Buscar enlaces que apunten a 'Scores and Fixtures' (texto o href) y contengan la temporada
         a_tags = soup.find_all("a", href=True)
         hrefs = [(a.get_text(strip=True), a["href"]) for a in a_tags]
 
@@ -254,18 +288,20 @@ def get_previus_matches(slug_equipo: str, fecha: str, X: int, debug: bool=False)
 
         for year in seasons:
             season_str = f"{year}-{year+1}"
-            # Heurísticas: texto "Scores & Fixtures" o "Scores and Fixtures", y/o href con 'matchlogs'/'schedule'
             cand = None
             for text, h in hrefs:
                 txt = (text or "").lower()
-                if "scores" in txt and "fixture" in txt and season_str in h:
+                href_l = h.lower()
+                # Buscamos "Scores & Fixtures" o variantes, que contengan la temporada
+                if "scores" in txt and "fixture" in txt and season_str in href_l:
                     cand = _to_abs(h); break
-                if season_str in h and ("matchlogs" in h or "schedule" in h):
+                # Fallback por patrones de href conocidos
+                if season_str in href_l and ("matchlogs" in href_l or "schedule" in href_l):
                     cand = _to_abs(h); break
             if cand:
                 urls.append(cand)
 
-        # Si no encontró nada con temporada explícita, como fallback toma el primer "Scores & Fixtures"
+        # Fallback: si no hay temporada explícita, toma el primer "Scores & Fixtures"
         if not urls:
             for text, h in hrefs:
                 txt = (text or "").lower()
@@ -275,17 +311,15 @@ def get_previus_matches(slug_equipo: str, fecha: str, X: int, debug: bool=False)
 
         return urls
 
-    # Intentamos temporada base y vamos retrocediendo hasta reunir X (por ejemplo, 5 temporadas máx)
-    seasons_to_try = [temporada_base - i for i in range(0, 6)]  # base, base-1, ..., base-5
+    # Intentamos temporada base y retrocedemos (limitar a 4 temporadas para bajar carga)
+    seasons_to_try = [temporada_base - i for i in range(0, 4)]  # base..base-3
     team_sf_urls = _find_scores_fixtures_urls(team_base, seasons_to_try)
     if not team_sf_urls:
-        # A veces la base ya es una página de temporada; probamos directo un patrón adicional:
-        # No forzamos patrón fijo para evitar romper si FBref cambia; respetamos heurística anterior.
         if debug: print("[scores&fixtures] no encontrado")
         return []
 
     # ------------------------------------------------------------
-    # 3) Parsear cada tabla de 'Scores & Fixtures' (todas las comps) y recolectar previos a d_cut
+    # 3) Parsear cada tabla de 'Scores & Fixtures' (todas comps) y recolectar previos a d_cut
     # ------------------------------------------------------------
     collected: List[Tuple[datetime, str, str]] = []  # (date, 'home-away', 'gH-gA')
 
@@ -299,7 +333,6 @@ def get_previus_matches(slug_equipo: str, fecha: str, X: int, debug: bool=False)
 
         soup = BeautifulSoup(r.text, parser)
 
-        # Función genérica para capturar rows
         def _iter_rows(s):
             for tr in s.select("table tbody tr"):
                 yield tr
@@ -336,7 +369,7 @@ def get_previus_matches(slug_equipo: str, fecha: str, X: int, debug: bool=False)
             h = slugify_team(h_name)
             a = slugify_team(a_name)
 
-            # Confirma que uno de los dos es nuestro equipo objetivo (por si la página mezcla cosas)
+            # Confirmar que uno de los dos es nuestro equipo objetivo
             if h != target and a != target:
                 continue
 
@@ -345,23 +378,21 @@ def get_previus_matches(slug_equipo: str, fecha: str, X: int, debug: bool=False)
             if not score:
                 continue
             score = re.sub(r"\s*–\s*", "-", score)  # normaliza guion
-            # Evitar filas tipo "Postp" o sin formato "x-y"
-            if not re.match(r"^\d+\s*-\s*\d+$", score):
+            if not re.match(r"^\d+\s*-\s*\d+$", score):  # evitar "Postp", "AET", etc., si cambian formato
                 continue
 
             collected.append((mdate, f"{h}-{a}", score))
 
-    # Parseamos urls en orden (más recientes primero según cómo las encontramos)
+    # Parseamos urls en orden (más recientes primero)
     for u in team_sf_urls:
         _parse_scores_fixtures(u)
         if len(collected) >= X:
             break
 
-    # Si aún no alcanza X, intenta temporadas anteriores adicionales (si no estaban ya en team_sf_urls)
+    # Si aún no alcanza X, intenta temporadas adicionales no cubiertas (por si faltó algún enlace)
     if len(collected) < X:
         extra_years = [y for y in seasons_to_try if all(str(y) not in u for u in team_sf_urls)]
         for y in extra_years:
-            # Re-descubrir URL de esa temporada concreta (por si faltó)
             more_urls = _find_scores_fixtures_urls(team_base, [y])
             for u in more_urls:
                 _parse_scores_fixtures(u)
@@ -380,4 +411,3 @@ def get_previus_matches(slug_equipo: str, fecha: str, X: int, debug: bool=False)
         gH, gA = score.split("-")
         out.append(Result(h_slug, a_slug, gH, gA, date_obj))
     return out
-
