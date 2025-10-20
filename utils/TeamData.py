@@ -3,8 +3,8 @@ class TeamData:
     """
         Almacena informacion de local o visitante dentro de un registro
     """
-    def __init__(self, slug):
-        self.slug = slug
+    def __init__(self, team_name):
+        self.name = team_name
         self.elo = None
         self.previus_resuls = []
 

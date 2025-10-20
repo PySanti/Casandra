@@ -5,15 +5,15 @@ import re
 import time
 import random
 from datetime import datetime, timedelta
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Iterable, Dict, Set
 import unicodedata
 import requests
 
 # ---------- Config ----------
 UA = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Safari/605.1.15",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0 Safari/537.36",
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36",
 ]
 def _headers():
     return {
@@ -25,115 +25,123 @@ def _headers():
     }
 
 # ---------- Normalización ----------
-def _norm(s: str) -> str:
-    if not s:
-        return ""
-    norm = unicodedata.normalize("NFKD", s)
-    norm = "".join(c for c in norm if not unicodedata.combining(c))
-    norm = norm.lower()
-    norm = re.sub(r"[^a-z0-9]+", "", norm)
-    return norm
-
-# Mapa slug -> candidatos de nombre tal y como suelen aparecer en ClubElo
-TEAM_NAME_CANDIDATES = {
-    # España
-    "bar": ["Barcelona", "FC Barcelona"],
-    "rma": ["Real Madrid"],
-    "atm": ["Atletico Madrid", "Atlético Madrid", "Atl Madrid"],
-    "sev": ["Sevilla"],
-    "soc": ["Real Sociedad"],
-    "ath": ["Athletic Bilbao", "Athletic Club"],
-    "bet": ["Real Betis"],
-    "vil": ["Villarreal"],
-    "val": ["Valencia"],
-    "cel": ["Celta Vigo", "Celta de Vigo"],
-    "ray": ["Rayo Vallecano"],
-    "gir": ["Girona"],
-    "get": ["Getafe"],
-    "mlr": ["Mallorca", "RCD Mallorca"],
-    "lpa": ["Las Palmas", "UD Las Palmas"],
-    "ala": ["Alaves", "Deportivo Alaves", "Alavés", "Deportivo Alavés"],
-    "gra": ["Granada"],
-    "cad": ["Cadiz", "Cádiz"],
-    "leg": ["Leganes", "Leganés"],
-    "osa": ["Osasuna", "CA Osasuna"],
-    "rvad": ["Real Valladolid", "Valladolid"],
-    "spo": ["Sporting Gijon", "Sporting de Gijon", "Sporting de Gijón"],
-    'el' : ['Elche'],
-    # Inglaterra
-    "mci": ["Man City", "Manchester City"],
-    "mun": ["Man United", "Manchester United"],
-    "liv": ["Liverpool"],
-    "ars": ["Arsenal"],
-    "che": ["Chelsea"],
-    "tot": ["Tottenham", "Tottenham Hotspur"],
-    "new": ["Newcastle", "Newcastle United"],
-    "whu": ["West Ham", "West Ham United"],
-    "avl": ["Aston Villa"],
-    "eve": ["Everton"],
-    "lei": ["Leicester", "Leicester City"],
-    "bha": ["Brighton", "Brighton & Hove Albion"],
-    "bre": ["Brentford"],
-    "bou": ["Bournemouth"],
-    "cry": ["Crystal Palace"],
-    "ful": ["Fulham"],
-    "wol": ["Wolves", "Wolverhampton", "Wolverhampton Wanderers"],
-    "for": ["Nottingham Forest"],
-    "ips": ["Ipswich", "Ipswich Town"],
-    "sou": ["Southampton"],
-    "shu": ["Sheffield United"],
-    "bur": ["Burnley"],
-    # Italia
-    "juv": ["Juventus"],
-    "int": ["Inter", "Internazionale", "Inter Milan"],
-    "mil": ["AC Milan", "Milan"],
-    "nap": ["Napoli"],
-    "rom": ["Roma", "AS Roma"],
-    "laz": ["Lazio", "SS Lazio"],
-    "ata": ["Atalanta"],
-    "fio": ["Fiorentina"],
-    "tor": ["Torino"],
-    "bol": ["Bologna"],
-    "gen": ["Genoa"],
-    "sam": ["Sampdoria"],
-    "cag": ["Cagliari"],
-    "emp": ["Empoli"],
-    "udi": ["Udinese"],
-    "mon": ["Monza", "AS Monaco"],  # ojo: 'mon' puede colisionar con Monaco (FRA); si es francés usa 'ligue1'
-    "lec": ["Lecce"],
-    "sas": ["Sassuolo"],
-    # Alemania
-    "bay": ["Bayern", "Bayern Munchen", "Bayern München"],
-    "bvb": ["Borussia Dortmund", "Dortmund"],
-    "rbl": ["RB Leipzig"],
-    "lev": ["Bayer Leverkusen"],
-    "bmg": ["Borussia Monchengladbach", "Borussia Mönchengladbach", "Monchengladbach", "Mönchengladbach"],
-    "vfb": ["VfB Stuttgart", "Stuttgart"],
-    "wob": ["Wolfsburg", "VfL Wolfsburg"],
-    "sge": ["Eintracht Frankfurt", "Frankfurt"],
-    "scf": ["SC Freiburg", "Freiburg"],
-    "svw": ["Werder Bremen", "Bremen"],
-    "uni": ["Union Berlin", "1. FC Union Berlin"],
-    "fca": ["Augsburg"],
-    "fck": ["Koln", "Köln", "1. FC Koln", "1. FC Köln", "FC Koln", "FC Köln"],
-    # Francia
-    "psg": ["Paris SG", "Paris Saint-Germain", "PSG"],
-    "om":  ["Marseille", "Olympique Marseille", "Olympique de Marseille"],
-    "lyo": ["Lyon", "Olympique Lyonnais"],
-    "lil": ["Lille", "LOSC Lille"],
-    "nic": ["Nice", "OGC Nice"],
-    "ren": ["Rennes", "Stade Rennais"],
-    "nan": ["Nantes"],
-    "monp":["Montpellier", "Montpellier HSC"],
-    "gir": ["Bordeaux", "Girondins Bordeaux", "Girondins de Bordeaux"],
-    "rcl": ["Lens", "RC Lens"],
-    "rcs": ["Strasbourg", "RC Strasbourg"],
-    "tou": ["Toulouse"],
-    "rei": ["Reims", "Stade de Reims"],
+_WORDS_TO_DROP: Set[str] = {
+    # genéricos multi-idioma
+    "fc","cf","afc","sfc","cfc","sc","ac","ud","cd","rcd","ssc","sv","vfl","vfb","rb",
+    "as","ss","club","football","futbol","fútbol","calcio","deportivo","athletic",
+    "sporting","hotspur","queens","racing","association","city","united","town",
+    "real","de","la","el","los","las","clubul","futebol","futbolu","athletico",
+    "athlético","sociedad","athletik","fk","sk","nk","bk","if","us","sd","sad"
 }
 
+def _strip_accents(s: str) -> str:
+    return "".join(c for c in unicodedata.normalize("NFKD", s or "") if not unicodedata.combining(c))
+
+def _norm(s: str) -> str:
+    """Normalización fuerte: sin acentos, minúsculas, solo alfanumérico."""
+    s = _strip_accents(s or "").lower()
+    return re.sub(r"[^a-z0-9]+", "", s)
+
+def _tokens(s: str) -> List[str]:
+    """Tokens alfabéticos sin acentos y en minúscula."""
+    s = _strip_accents(s or "").lower()
+    return re.findall(r"[a-z0-9]+", s)
+
+def _tokens_clean(s: str) -> List[str]:
+    """Tokens eliminando palabras genéricas."""
+    toks = _tokens(s)
+    return [t for t in toks if t not in _WORDS_TO_DROP]
+
+def _token_set(s: str) -> Set[str]:
+    return set(_tokens_clean(s))
+
+def _jaccard(a: Iterable[str], b: Iterable[str]) -> float:
+    A, B = set(a), set(b)
+    if not A and not B:
+        return 0.0
+    inter = len(A & B)
+    union = len(A | B)
+    return inter / union if union else 0.0
+
+# --- Alias heurísticos desde nombre libre ---
+def _alias_variants_from_name(team_name: str) -> List[str]:
+    """
+    Genera variantes útiles del nombre recibido:
+    - original
+    - sin palabras genéricas (FC, CF, Club, de…)
+    - sin paréntesis, sin sufijos tipo 'SAD'
+    - invertir orden si parece 'Club Ciudad' -> 'Ciudad'
+    - abreviaciones habituales (Man City, Man United, PSG, etc.) incluidas en MAP opcional
+    """
+    base = (team_name or "").strip()
+    out: List[str] = []
+    if not base:
+        return out
+
+    # 1) original
+    out.append(base)
+
+    # 2) sin paréntesis y contenido dentro
+    no_par = re.sub(r"\s*\([^)]*\)\s*", " ", base).strip()
+    if no_par and no_par != base:
+        out.append(no_par)
+
+    # 3) colapsar espacios
+    base2 = re.sub(r"\s+", " ", no_par).strip()
+    out.append(base2)
+
+    # 4) eliminar palabras genéricas
+    toks = _tokens(base2)
+    toks_clean = [t for t in toks if t not in _WORDS_TO_DROP]
+    if toks_clean:
+        out.append(" ".join(toks_clean))
+
+    # 5) variantes con y sin artículos/preposiciones 'de', 'la', etc.
+    out.append(" ".join(_tokens(base2)))  # solo tokens simples
+    out.append(" ".join(toks_clean))
+
+    # 6) si el nombre comienza con algo tipo 'Club/C.F./F.C.' seguido de 'Ciudad'
+    #    quedarnos también con la última palabra(s)
+    if len(toks_clean) >= 1:
+        out.append(toks_clean[-1])
+    if len(toks_clean) >= 2:
+        out.append(" ".join(toks_clean[-2:]))
+
+    # 7) reemplazos frecuentes
+    rep = [
+        (r"\bmunich\b", "munchen"),
+        (r"\bkoln\b", "koln"),
+        (r"\bköln\b", "koln"),
+        (r"\bmonchengladbach\b", "monchengladbach"),
+        (r"\bmönchengladbach\b", "monchengladbach"),
+        (r"\bsaint[- ]germain\b", "psg"),
+        (r"\bmanchester city\b", "man city"),
+        (r"\bmanchester united\b", "man united"),
+        (r"\binter milan\b", "inter"),
+        (r"\bfc barcelona\b", "barcelona"),
+        (r"\breal madrid cf\b", "real madrid"),
+    ]
+    for pat, repl in rep:
+        v = re.sub(pat, repl, base2, flags=re.IGNORECASE)
+        if v.lower() != base2.lower():
+            out.append(v)
+
+    # deduplicar preservando orden
+    seen = set()
+    uniq: List[str] = []
+    for v in out:
+        v2 = re.sub(r"\s+", " ", v).strip()
+        if not v2:
+            continue
+        key = v2.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        uniq.append(v2)
+    return uniq
+
 # ---------- HTTP robusto con backoff ----------
-def _robust_get(url: str, max_retries=5, base_delay=1.5, debug=False) -> requests.Response:
+def _robust_get(url: str, max_retries=5, base_delay=1.2, debug=False) -> requests.Response:
     s = requests.Session()
     for i in range(max_retries):
         r = s.get(url, headers=_headers(), timeout=25)
@@ -144,12 +152,12 @@ def _robust_get(url: str, max_retries=5, base_delay=1.5, debug=False) -> request
             if ra and ra.isdigit():
                 wait = int(ra)
             else:
-                wait = base_delay * (2 ** i) + random.uniform(0, 1.0)
+                wait = base_delay * (2 ** i) + random.uniform(0, 0.8)
             if debug: print(f"[backoff] 429 -> sleep {wait:.1f}s")
             time.sleep(wait)
             continue
         if 500 <= r.status_code < 600:
-            wait = base_delay * (2 ** i) + random.uniform(0, 1.0)
+            wait = base_delay * (2 ** i) + random.uniform(0, 0.8)
             if debug: print(f"[backoff] {r.status_code} -> sleep {wait:.1f}s")
             time.sleep(wait)
             continue
@@ -157,47 +165,100 @@ def _robust_get(url: str, max_retries=5, base_delay=1.5, debug=False) -> request
         return r
     raise RuntimeError(f"Max retries alcanzado para {url}")
 
-# ---------- Núcleo ----------
-def _candidates_for_slug(slug: str) -> List[str]:
-    s = slug.strip().lower()
-    return TEAM_NAME_CANDIDATES.get(s, [])
-
+# ---------- CSV helpers ----------
 def _parse_csv(text: str) -> List[dict]:
-    # ClubElo API devuelve CSV en texto plano
     f = io.StringIO(text)
     reader = csv.DictReader(f)
     rows = []
     for row in reader:
-        # normalizar claves posibles
-        row_norm = {k.strip(): (v.strip() if isinstance(v, str) else v) for k, v in row.items()}
-        rows.append(row_norm)
+        rows.append({(k or "").strip(): (v.strip() if isinstance(v, str) else v) for k, v in row.items()})
     return rows
-
-def _find_row_for_team(rows: List[dict], candidates: List[str]) -> Optional[dict]:
-    cand_norm = {_norm(c) for c in candidates}
-    for r in rows:
-        club = r.get("Club") or r.get("club") or r.get("Team") or r.get("team")
-        if not club:
-            continue
-        if _norm(club) in cand_norm:
-            return r
-    return None
 
 def _extract_elo(row: dict) -> Optional[float]:
     for key in ("Elo", "elo", "EloRating", "Elo rating"):
-        if key in row:
-            val = row[key]
+        if key in row and row[key] not in (None, ""):
             try:
-                return float(val)
+                return float(row[key])
             except Exception:
                 pass
     return None
 
-def get_team_elo(slug_equipo: str, fecha: str, back_days: int = 3, debug: bool=False) -> Optional[Tuple[int, int]]:
+def _row_club_name(row: dict) -> Optional[str]:
+    for k in ("Club", "club", "Team", "team"):
+        if k in row and row[k]:
+            return row[k]
+    return None
+
+# ---------- Matching ----------
+def _best_row_for_team(rows: List[dict], name_variants: List[str], debug: bool=False) -> Optional[dict]:
     """
-    Devuelve (ranking, elo) del equipo (slug) en la fecha dada (dd/mm/aa).
-    Si el club no aparece exactamente ese día, busca hacia atrás hasta `back_days`.
-    Retorna None si no se encuentra.
+    Selecciona la mejor fila de 'rows' cuyo club coincida con alguna de las variantes del nombre.
+    Estrategia:
+      1) match exacto por _norm
+      2) prefix/suffix match por _norm
+      3) similitud Jaccard de tokens limpios (umbral >= 0.6)
+      4) mejor similitud global si >= 0.5
+    """
+    if not rows or not name_variants:
+        return None
+
+    # Preprocesar filas
+    clubs: List[Tuple[dict, str, str, Set[str]]] = []  # (row, club_raw, club_norm, club_tokset)
+    for r in rows:
+        c = _row_club_name(r)
+        if not c:
+            continue
+        club_norm = _norm(c)
+        club_tok = _token_set(c)
+        clubs.append((r, c, club_norm, club_tok))
+
+    # Precompute variants normalized/tokens
+    variants_norm = [(_norm(v), _token_set(v), v) for v in name_variants if v]
+
+    # 1) Exacto por _norm
+    for r, c, c_norm, _ in clubs:
+        for vn, _, _orig in variants_norm:
+            if c_norm and vn and c_norm == vn:
+                if debug: print(f"[match-exact] '{c}' == '{_orig}'")
+                return r
+
+    # 2) prefix/suffix por _norm (p.ej., 'athleticbilbao' vs 'athleticclub')
+    for r, c, c_norm, _ in clubs:
+        for vn, _, _orig in variants_norm:
+            if not c_norm or not vn:
+                continue
+            if c_norm.startswith(vn) or vn.startswith(c_norm):
+                if debug: print(f"[match-prefix] '{c}' ~ '{_orig}'")
+                return r
+
+    # 3) Jaccard >= 0.6
+    best: Tuple[float, dict] = (0.0, None)  # (score, row)
+    for r, c, _, c_tok in clubs:
+        for vn, v_tok, _orig in variants_norm:
+            score = _jaccard(c_tok, v_tok)
+            if score >= 0.6:
+                if debug: print(f"[match-jaccard>=0.6] '{c}' ~ '{_orig}' -> {score:.2f}")
+                return r
+            if score > best[0]:
+                best = (score, r)
+
+    # 4) mejor similitud si >= 0.5
+    if best[1] is not None and best[0] >= 0.5:
+        if debug:
+            c_name = _row_club_name(best[1]) or "?"
+            print(f"[match-best>=0.5] '{c_name}' -> {best[0]:.2f}")
+        return best[1]
+
+    return None
+
+# ---------- API principal ----------
+def get_team_elo(team_name: str, fecha: str, back_days: int = 3, debug: bool=False) -> Optional[Tuple[int, int]]:
+    """
+    Devuelve (ranking, elo) del equipo (por NOMBRE) en la fecha dada 'dd/mm/aa'.
+    Estrategia:
+      - Construye variantes del nombre (alias heurísticos).
+      - Descarga CSV de ClubElo del día y, si no aparece, retrocede hasta `back_days`.
+      - Calcula ranking por Elo del día y devuelve (rank, int(elo)).
     """
     # 1) Fecha -> YYYY-MM-DD
     try:
@@ -205,17 +266,19 @@ def get_team_elo(slug_equipo: str, fecha: str, back_days: int = 3, debug: bool=F
     except ValueError:
         raise ValueError("La fecha debe ser dd/mm/aa, ej. '28/09/25'.")
 
-    candidates = _candidates_for_slug(slug_equipo)
-    if not candidates:
-        if debug:
-            print(f"[WARN] No hay candidatos de nombre para slug '{slug_equipo}'. Amplía TEAM_NAME_CANDIDATES.")
+    # 2) Variantes de nombre
+    variants = _alias_variants_from_name(team_name)
+    if debug:
+        print(f"[ELO] Variantes '{team_name}': {variants[:6]}{' ...' if len(variants)>6 else ''}")
+    if not variants:
         return None
 
-    # 2) Intentar día exacto y hacia atrás
+    # 3) Buscar día exacto y hacia atrás
     for delta in range(0, back_days + 1):
         day = d - timedelta(days=delta)
         day_str = day.strftime("%Y-%m-%d")
         url = f"http://api.clubelo.com/{day_str}"
+
         try:
             resp = _robust_get(url, debug=debug)
         except Exception as e:
@@ -226,7 +289,7 @@ def get_team_elo(slug_equipo: str, fecha: str, back_days: int = 3, debug: bool=F
         if not rows:
             continue
 
-        # Convertir a floats y ordenar por Elo desc para calcular ranking
+        # conservar solo filas con Elo válido
         scored = []
         for r in rows:
             elo = _extract_elo(r)
@@ -236,19 +299,21 @@ def get_team_elo(slug_equipo: str, fecha: str, back_days: int = 3, debug: bool=F
         if not scored:
             continue
 
-        scored.sort(key=lambda t: t[0], reverse=True)  # Elo desc
-        # Build ranking map: club -> rank
-        rank_map = {}
-        for idx, (_, r) in enumerate(scored, start=1):
-            club = r.get("Club") or r.get("club") or r.get("Team") or r.get("team")
+        # ranking por Elo descendente
+        scored.sort(key=lambda t: t[0], reverse=True)
+        rank_map: Dict[str, int] = {}
+        flat_rows: List[dict] = []
+        for idx, (elo_val, r) in enumerate(scored, start=1):
+            club = _row_club_name(r)
             if club:
                 rank_map[_norm(club)] = idx
+            flat_rows.append(r)
 
-        # Buscar el club entre los candidatos
-        row = _find_row_for_team([r for _, r in scored], candidates)
+        # matching robusto
+        row = _best_row_for_team(flat_rows, variants, debug=debug)
         if row:
             elo_val = _extract_elo(row)
-            club_name = row.get("Club") or row.get("club") or row.get("Team") or row.get("team")
+            club_name = _row_club_name(row) or team_name
             rank = rank_map.get(_norm(club_name))
             if elo_val is not None and rank is not None:
                 if debug:
@@ -256,7 +321,7 @@ def get_team_elo(slug_equipo: str, fecha: str, back_days: int = 3, debug: bool=F
                 return (rank, int(round(elo_val)))
 
         if debug:
-            print(f"[miss] {slug_equipo} no encontrado en {day_str}, sigo buscando...")
+            print(f"[miss] '{team_name}' no encontrado en {day_str}, sigo {delta+1}/{back_days}…")
 
     if debug:
         print("No se encontró Elo/ranking para ese equipo en la ventana indicada.")

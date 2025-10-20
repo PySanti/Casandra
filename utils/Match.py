@@ -15,13 +15,13 @@ class Match:
         self.teams_data = [local_data,away_data]
     def set_teams_elo(self):
         for team in self.teams_data:
-            elo = get_team_elo(team.slug, self.date, debug=DEBUG)
-            print(f'{team.slug} : {elo}')
+            elo = get_team_elo(team.name, self.date, debug=DEBUG)
+            print(f'{team.name} : {elo}')
             team.elo = elo
     def set_performance_data(self):
         for team in self.teams_data:
-            team.previus_results = get_previus_matches(team.slug, self.date, PREVIUS_MATCHES_CONSIDERED, debug=DEBUG)
-            print(f"Mostrando previus results de {team.slug}")
+            team.previus_results = get_previus_matches(team.name, self.date, PREVIUS_MATCHES_CONSIDERED, debug=DEBUG)
+            print(f"Mostrando previus results de {team.name}")
             print(  team.previus_results)
             team.set_previus_performance()
     def set_resting_days(self):
@@ -33,7 +33,7 @@ class Match:
             self.teams_data[AWAY].scored_goals = match_result.away_goals
     def set_teams_value(self):
         for team in self.teams_data:
-            team.vmt = get_team_value(team.slug, self.date, debug=DEBUG)
+            team.vmt = get_team_value(team.name, self.date, debug=DEBUG)
     def __str__(self):
         return f"""
 
