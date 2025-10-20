@@ -1,9 +1,5 @@
-from utils import get_previews_matches
 from utils.get_match_features import get_match_features
-from utils.get_match_result import get_match_result
-from utils.get_team_value import get_team_value
-from utils.get_elo import get_team_elo
-from utils.get_previews_matches import get_previus_matches
 
-print(get_match_features('sev-bar', '05/10/25','laliga'))
+
+print(get_match_features('sev-bar', '5/10/25','laliga'))
 

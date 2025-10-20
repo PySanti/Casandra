@@ -7,11 +7,17 @@ def get_match_features(slug, date, ligue):
                   TeamData(local_team),
                   TeamData(away_team),
         )
+
+    print("Buscando elos de equipos")
     match.set_teams_elo()
-    #match.set_match_result()
-    match.set_teams_value()
-    match.set_performance_data()
-    match.set_resting_days()
+    print("Buscando resultado del encuentro")
+    match.set_match_result()
+#    print("Buscando valores de equipos")
+#    match.set_teams_value()
+#    print("Buscando data de performance")
+#    match.set_performance_data()
+#    print("Calculando dias de descanso")
+#    match.set_resting_days()
     return match
 
 
