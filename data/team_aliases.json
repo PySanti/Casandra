@@ -1,0 +1,925 @@
+{
+  "ars": [
+    "Arsenal"
+  ],
+  "av": [
+    "Aston Villa",
+    "Arzignano Valchiampo"
+  ],
+  "bou": [
+    "Bournemouth",
+    "Boulogne"
+  ],
+  "bre": [
+    "Brentford",
+    "Brest",
+    "Brescia"
+  ],
+  "bha": [
+    "Brighton & Hove Albion"
+  ],
+  "che": [
+    "Chelsea",
+    "Cheltenham Town",
+    "Chesterfield"
+  ],
+  "cp": [
+    "Crystal Palace"
+  ],
+  "eve": [
+    "Everton"
+  ],
+  "ful": [
+    "Fulham"
+  ],
+  "ips": [
+    "Ipswich Town"
+  ],
+  "lei": [
+    "Leicester City"
+  ],
+  "liv": [
+    "Liverpool"
+  ],
+  "man": [
+    "Manchester City",
+    "Manchester United",
+    "Mantova"
+  ],
+  "new": [
+    "Newcastle United"
+  ],
+  "nf": [
+    "Nottingham Forest"
+  ],
+  "sou": [
+    "Southampton"
+  ],
+  "tot": [
+    "Tottenham Hotspur"
+  ],
+  "wh": [
+    "West Ham United"
+  ],
+  "ww": [
+    "Wolverhampton Wanderers",
+    "Wehen Wiesbaden",
+    "Wycombe Wanderers"
+  ],
+  "ala": [
+    "Alaves"
+  ],
+  "ath": [
+    "Athletic Club"
+  ],
+  "adm": [
+    "Atletico de Madrid"
+  ],
+  "bar": [
+    "Barcelona",
+    "Bari",
+    "Barnsley"
+  ],
+  "cdv": [
+    "Celta de Vigo"
+  ],
+  "esp": [
+    "Espanyol"
+  ],
+  "get": [
+    "Getafe"
+  ],
+  "gir": [
+    "Girona"
+  ],
+  "lp": [
+    "Las Palmas"
+  ],
+  "leg": [
+    "Leganes"
+  ],
+  "mal": [
+    "Mallorca",
+    "Malaga"
+  ],
+  "osa": [
+    "Osasuna"
+  ],
+  "rv": [
+    "Rayo Vallecano"
+  ],
+  "rea": [
+    "Real Betis",
+    "Real Madrid",
+    "Real Sociedad",
+    "Real Oviedo",
+    "Real Sporting",
+    "Real Zaragoza",
+    "Real Valladolid",
+    "Reading",
+    "Real Aviles",
+    "Real Union"
+  ],
+  "sev": [
+    "Sevilla"
+  ],
+  "val": [
+    "Valencia",
+    "Valladolid"
+  ],
+  "vil": [
+    "Villarreal"
+  ],
+  "ata": [
+    "Atalanta"
+  ],
+  "bol": [
+    "Bologna"
+  ],
+  "cag": [
+    "Cagliari"
+  ],
+  "com": [
+    "Como"
+  ],
+  "emp": [
+    "Empoli"
+  ],
+  "fio": [
+    "Fiorentina",
+    "Fiorenzuola"
+  ],
+  "gen": [
+    "Genoa"
+  ],
+  "int": [
+    "Inter",
+    "Intercity"
+  ],
+  "juv": [
+    "Juventus"
+  ],
+  "laz": [
+    "Lazio"
+  ],
+  "lec": [
+    "Lecce"
+  ],
+  "mil": [
+    "Milan",
+    "Millwall"
+  ],
+  "mon": [
+    "Monza",
+    "Monaco",
+    "Montpellier",
+    "Monopoli"
+  ],
+  "nap": [
+    "Napoli"
+  ],
+  "par": [
+    "Parma",
+    "Paris FC",
+    "Paris"
+  ],
+  "rom": [
+    "Roma"
+  ],
+  "tor": [
+    "Torino",
+    "Torres"
+  ],
+  "udi": [
+    "Udinese"
+  ],
+  "ven": [
+    "Venezia"
+  ],
+  "ver": [
+    "Verona",
+    "Versailles"
+  ],
+  "aug": [
+    "Augsburg"
+  ],
+  "bl": [
+    "Bayer Leverkusen"
+  ],
+  "bm": [
+    "Bayern Munich",
+    "Borussia Monchengladbach"
+  ],
+  "boc": [
+    "Bochum"
+  ],
+  "bd": [
+    "Borussia Dortmund"
+  ],
+  "ef": [
+    "Eintracht Frankfurt"
+  ],
+  "fch": [
+    "FC Heidenheim",
+    "Heidenheim"
+  ],
+  "fre": [
+    "Freiburg"
+  ],
+  "ham": [
+    "Hamburger SV"
+  ],
+  "hof": [
+    "Hoffenheim"
+  ],
+  "hk": [
+    "Holstein Kiel"
+  ],
+  "m0": [
+    "Mainz 05"
+  ],
+  "rbl": [
+    "RB Leipzig"
+  ],
+  "scp": [
+    "SC Paderborn"
+  ],
+  "sp": [
+    "St. Pauli"
+  ],
+  "stu": [
+    "Stuttgart"
+  ],
+  "ub": [
+    "Union Berlin"
+  ],
+  "wb": [
+    "Werder Bremen"
+  ],
+  "wol": [
+    "Wolfsburg"
+  ],
+  "ang": [
+    "Angers"
+  ],
+  "aux": [
+    "Auxerre"
+  ],
+  "bor": [
+    "Bordeaux"
+  ],
+  "cle": [
+    "Clermont"
+  ],
+  "len": [
+    "Lens"
+  ],
+  "lh": [
+    "Le Havre"
+  ],
+  "lil": [
+    "Lille"
+  ],
+  "lor": [
+    "Lorient"
+  ],
+  "lyo": [
+    "Lyon"
+  ],
+  "mar": [
+    "Marseille",
+    "Marbella",
+    "Martigues"
+  ],
+  "met": [
+    "Metz"
+  ],
+  "nan": [
+    "Nantes",
+    "Nancy"
+  ],
+  "nic": [
+    "Nice"
+  ],
+  "psg": [
+    "Paris Saint-Germain"
+  ],
+  "rei": [
+    "Reims"
+  ],
+  "ren": [
+    "Rennes",
+    "Renate"
+  ],
+  "str": [
+    "Strasbourg"
+  ],
+  "bir": [
+    "Birmingham City"
+  ],
+  "br": [
+    "Blackburn Rovers"
+  ],
+  "bri": [
+    "Bristol City",
+    "Brindisi"
+  ],
+  "car": [
+    "Cardiff City",
+    "Cartagena",
+    "Carrarese"
+  ],
+  "cov": [
+    "Coventry City"
+  ],
+  "dc": [
+    "Derby County"
+  ],
+  "hul": [
+    "Hull City"
+  ],
+  "lee": [
+    "Leeds United"
+  ],
+  "mid": [
+    "Middlesbrough"
+  ],
+  "nor": [
+    "Norwich City",
+    "Northampton Town"
+  ],
+  "oxf": [
+    "Oxford United",
+    "Oxford City"
+  ],
+  "pa": [
+    "Plymouth Argyle"
+  ],
+  "por": [
+    "Portsmouth",
+    "Pordenone"
+  ],
+  "pne": [
+    "Preston North End"
+  ],
+  "que": [
+    "Queens Park Rangers"
+  ],
+  "she": [
+    "Sheffield United"
+  ],
+  "sto": [
+    "Stoke City"
+  ],
+  "sun": [
+    "Sunderland"
+  ],
+  "swa": [
+    "Swansea City"
+  ],
+  "wat": [
+    "Watford"
+  ],
+  "wba": [
+    "West Bromwich Albion"
+  ],
+  "ab": [
+    "Albacete Balompie",
+    "Arminia Bielefeld",
+    "Atletico Baleares"
+  ],
+  "alc": [
+    "Alcorcon",
+    "Alcoyano"
+  ],
+  "bur": [
+    "Burgos"
+  ],
+  "cde": [
+    "CD Eldense"
+  ],
+  "cdt": [
+    "CD Tenerife"
+  ],
+  "eib": [
+    "Eibar"
+  ],
+  "elc": [
+    "Elche"
+  ],
+  "fca": [
+    "FC Andorra",
+    "Andorra"
+  ],
+  "hue": [
+    "Huesca"
+  ],
+  "lev": [
+    "Levante"
+  ],
+  "mir": [
+    "Mirandes"
+  ],
+  "rdf": [
+    "Racing de Ferrol"
+  ],
+  "rs": [
+    "Racing Santander",
+    "Red Star"
+  ],
+  "vb": [
+    "Villarreal B"
+  ],
+  "eb": [
+    "Eibar B"
+  ],
+  "asc": [
+    "Ascoli"
+  ],
+  "cit": [
+    "Cittadella"
+  ],
+  "cos": [
+    "Cosenza"
+  ],
+  "cre": [
+    "Cremonese",
+    "Creteil"
+  ],
+  "fer": [
+    "Feralpisalo",
+    "Fermana"
+  ],
+  "mod": [
+    "Modena"
+  ],
+  "pal": [
+    "Palermo"
+  ],
+  "pis": [
+    "Pisa"
+  ],
+  "reg": [
+    "Reggiana"
+  ],
+  "sam": [
+    "Sampdoria"
+  ],
+  "spe": [
+    "Spezia"
+  ],
+  "sud": [
+    "Sudtirol"
+  ],
+  "ter": [
+    "Ternana",
+    "Teruel"
+  ],
+  "cat": [
+    "Catanzaro",
+    "Catania"
+  ],
+  "cb": [
+    "Cagliari B"
+  ],
+  "ces": [
+    "Cesena"
+  ],
+  "fro": [
+    "Frosinone"
+  ],
+  "sb": [
+    "Sassuolo B"
+  ],
+  "1n": [
+    "1. FC Nurnberg"
+  ],
+  "1k": [
+    "1. FC Kaiserslautern"
+  ],
+  "1m": [
+    "1. FC Magdeburg",
+    "1860 Munich"
+  ],
+  "bi": [
+    "Bielefeld II",
+    "Bordeaux II"
+  ],
+  "d9": [
+    "Darmstadt 98"
+  ],
+  "dus": [
+    "Dusseldorf"
+  ],
+  "elv": [
+    "Elversberg"
+  ],
+  "gf": [
+    "Greuther Furth"
+  ],
+  "h9": [
+    "Hannover 96"
+  ],
+  "hb": [
+    "Hertha BSC"
+  ],
+  "hr": [
+    "Hansa Rostock"
+  ],
+  "kar": [
+    "Karlsruher SC"
+  ],
+  "kb": [
+    "Kiel B"
+  ],
+  "p0": [
+    "Paderborn 07"
+  ],
+  "saa": [
+    "Saarbrucken"
+  ],
+  "san": [
+    "Sandhausen",
+    "Sanluqueno"
+  ],
+  "s0": [
+    "Schalke 04"
+  ],
+  "wk": [
+    "Wurzburger Kickers"
+  ],
+  "ami": [
+    "Amiens"
+  ],
+  "ann": [
+    "Annecy"
+  ],
+  "ai": [
+    "Angers II",
+    "Auxerre II"
+  ],
+  "bas": [
+    "Bastia"
+  ],
+  "cae": [
+    "Caen"
+  ],
+  "con": [
+    "Concarneau"
+  ],
+  "dij": [
+    "Dijon"
+  ],
+  "dun": [
+    "Dunkerque"
+  ],
+  "gre": [
+    "Grenoble"
+  ],
+  "gui": [
+    "Guingamp"
+  ],
+  "lav": [
+    "Laval"
+  ],
+  "lhi": [
+    "Le Havre II"
+  ],
+  "nio": [
+    "Niort"
+  ],
+  "pau": [
+    "Pau FC",
+    "Pau"
+  ],
+  "qr": [
+    "Quevilly-Rouen"
+  ],
+  "rod": [
+    "Rodez"
+  ],
+  "se": [
+    "Saint-Etienne"
+  ],
+  "bw": [
+    "Bolton Wanderers"
+  ],
+  "ba": [
+    "Burton Albion"
+  ],
+  "cam": [
+    "Cambridge United"
+  ],
+  "cha": [
+    "Charlton Athletic",
+    "Chateauroux"
+  ],
+  "exe": [
+    "Exeter City"
+  ],
+  "fle": [
+    "Fleetwood Town"
+  ],
+  "gil": [
+    "Gillingham"
+  ],
+  "lo": [
+    "Leyton Orient"
+  ],
+  "lin": [
+    "Lincoln City",
+    "Linares Deportivo"
+  ],
+  "pet": [
+    "Peterborough United"
+  ],
+  "pv": [
+    "Port Vale",
+    "Pro Vercelli"
+  ],
+  "rot": [
+    "Rotherham United"
+  ],
+  "shr": [
+    "Shrewsbury Town"
+  ],
+  "ste": [
+    "Stevenage"
+  ],
+  "wig": [
+    "Wigan Athletic"
+  ],
+  "bla": [
+    "Blackpool"
+  ],
+  "cl": [
+    "Cultural Leonesa"
+  ],
+  "lc": [
+    "Deportivo La Coruna"
+  ],
+  "are": [
+    "Arenteiro",
+    "Arezzo"
+  ],
+  "cf": [
+    "Celta Fortuna"
+  ],
+  "fue": [
+    "Fuenlabrada"
+  ],
+  "gt": [
+    "Gimnastica Torrelavega"
+  ],
+  "op": [
+    "Osasuna Promesas"
+  ],
+  "our": [
+    "Ourense"
+  ],
+  "pon": [
+    "Ponferradina",
+    "Pontedera"
+  ],
+  "rds": [
+    "Racing de Santander B"
+  ],
+  "sr": [
+    "Sestao River"
+  ],
+  "udl": [
+    "UD Logrones"
+  ],
+  "vp": [
+    "Real Valladolid Promesas",
+    "Vis Pesaro"
+  ],
+  "sdc": [
+    "SD Compostela"
+  ],
+  "cay": [
+    "Cayon"
+  ],
+  "boi": [
+    "Boiro"
+  ],
+  "ac": [
+    "AD Ceuta"
+  ],
+  "alg": [
+    "Algeciras"
+  ],
+  "cas": [
+    "Castellon",
+    "Casertana"
+  ],
+  "cn": [
+    "CDA Navalcarnero"
+  ],
+  "cor": [
+    "Cordoba"
+  ],
+  "ibi": [
+    "Ibiza"
+  ],
+  "ma": [
+    "Merida AD"
+  ],
+  "mel": [
+    "Melilla"
+  ],
+  "mur": [
+    "Murcia"
+  ],
+  "rdh": [
+    "Recreativo de Huelva"
+  ],
+  "rg": [
+    "Recreativo Granada"
+  ],
+  "sf": [
+    "San Fernando"
+  ],
+  "iip": [
+    "UD Ibiza Islas Pitiusas"
+  ],
+  "yec": [
+    "Yeclano Deportivo"
+  ],
+  "alb": [
+    "Albinoleffe"
+  ],
+  "au": [
+    "Atalanta U23"
+  ],
+  "ge": [
+    "Giana Erminio"
+  ],
+  "jng": [
+    "Juventus Next Gen"
+  ],
+  "ls": [
+    "Legnago Salus"
+  ],
+  "nov": [
+    "Novara"
+  ],
+  "pad": [
+    "Padova"
+  ],
+  "per": [
+    "Pergolettese",
+    "Perugia"
+  ],
+  "pp": [
+    "Pro Patria"
+  ],
+  "ps": [
+    "Pro Sesto"
+  ],
+  "tre": [
+    "Trento"
+  ],
+  "tri": [
+    "Triestina"
+  ],
+  "vv": [
+    "Virtus Verona"
+  ],
+  "vic": [
+    "Vicenza"
+  ],
+  "anc": [
+    "Ancona"
+  ],
+  "ent": [
+    "Entella"
+  ],
+  "gub": [
+    "Gubbio"
+  ],
+  "olb": [
+    "Olbia"
+  ],
+  "pes": [
+    "Pescara"
+  ],
+  "pin": [
+    "Pineto"
+  ],
+  "rec": [
+    "Recanatese"
+  ],
+  "rim": [
+    "Rimini"
+  ],
+  "sie": [
+    "Siena"
+  ],
+  "sl": [
+    "Sestri Levante"
+  ],
+  "spa": [
+    "SPAL"
+  ],
+  "vit": [
+    "Viterbese"
+  ],
+  "ap": [
+    "AZ Picerno"
+  ],
+  "ave": [
+    "Avellino"
+  ],
+  "ben": [
+    "Benevento"
+  ],
+  "bit": [
+    "Bitonto"
+  ],
+  "cav": [
+    "Cavese"
+  ],
+  "cer": [
+    "Cerignola"
+  ],
+  "cro": [
+    "Crotone"
+  ],
+  "fog": [
+    "Foggia"
+  ],
+  "giu": [
+    "Giugliano"
+  ],
+  "js": [
+    "Juve Stabia"
+  ],
+  "lat": [
+    "Latina"
+  ],
+  "pot": [
+    "Potenza"
+  ],
+  "sor": [
+    "Sorrento"
+  ],
+  "tur": [
+    "Turris"
+  ],
+  "tar": [
+    "Taranto"
+  ],
+  "vf": [
+    "Virtus Francavilla"
+  ],
+  "aal": [
+    "Aalen"
+  ],
+  "dui": [
+    "Duisburg"
+  ],
+  "dd": [
+    "Dynamo Dresden"
+  ],
+  "ea": [
+    "Erzgebirge Aue"
+  ],
+  "hal": [
+    "Hallescher FC",
+    "Hallescher"
+  ],
+  "i0": [
+    "Ingolstadt 04"
+  ],
+  "jr": [
+    "Jahn Regensburg"
+  ],
+  "ko": [
+    "Kickers Offenbach"
+  ],
+  "mun": [
+    "Munster"
+  ],
+  "osn": [
+    "Osnabruck"
+  ],
+  "pm": [
+    "Preußen Munster"
+  ],
+  "rwe": [
+    "Rot-Weiss Essen"
+  ],
+  "si": [
+    "Saarbrucken II"
+  ],
+  "wm": [
+    "SV Waldhof Mannheim"
+  ],
+  "unt": [
+    "Unterhaching"
+  ],
+  "vfb": [
+    "VfB Lubeck"
+  ]
+}

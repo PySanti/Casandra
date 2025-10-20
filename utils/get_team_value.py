@@ -3,6 +3,8 @@
 # utils/get_team_value.py
 
 import re
+import os
+import json
 import random
 import time
 from datetime import datetime
@@ -13,7 +15,7 @@ import requests
 from bs4 import BeautifulSoup
 
 # ============================
-# HTTP / Headers / Backoff
+# Config y cachés
 # ============================
 UA = [
     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
@@ -21,6 +23,22 @@ UA = [
     "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36",
 ]
 
+TM_DOMAINS = [
+    "www.transfermarkt.com",
+    "www.transfermarkt.us",
+    "www.transfermarkt.de",
+    "www.transfermarkt.co.uk",
+]
+
+# Cachés en disco
+TMID_CACHE_FILE = "tm_id_cache.json"        # { slug: tm_id }
+VALUE_CACHE_FILE = "value_cache.json"       # { "<slug>|YYYYMM": "€xxx" }
+_VALUE_CACHE: Dict[str, str] = {}
+_TMID_CACHE: Dict[str, int] = {}
+
+# ============================
+# HTTP / Headers / Backoff
+# ============================
 def _headers():
     return {
         "User-Agent": random.choice(UA),
@@ -33,21 +51,30 @@ def _headers():
 _S = requests.Session()
 
 def _robust_get(url: str, max_retries=3, base_delay=1.2, debug=False) -> requests.Response:
+    last_exc = None
     for i in range(max_retries):
-        r = _S.get(url, headers=_headers(), timeout=25)
-        if debug:
-            print(f"[GET] {r.status_code} {url}")
-        if r.status_code in (429,) or (500 <= r.status_code < 600):
-            wait = base_delay * (2**i) + random.uniform(0, 0.8)
-            if debug: print(f"[backoff] {r.status_code} -> sleep {wait:.1f}s")
+        try:
+            r = _S.get(url, headers=_headers(), timeout=25)
+            if debug:
+                print(f"[GET] {r.status_code} {url}")
+            if r.status_code in (429,) or (500 <= r.status_code < 600):
+                wait = base_delay * (2**i) + random.uniform(0, 0.8)
+                if debug: print(f"[backoff] {r.status_code} -> sleep {wait:.1f}s")
+                time.sleep(wait)
+                continue
+            r.raise_for_status()
+            return r
+        except Exception as e:
+            last_exc = e
+            wait = base_delay * (2**i) + random.uniform(0, 0.6)
+            if debug: print(f"[GET-err] {e} -> sleep {wait:.1f}s")
             time.sleep(wait)
-            continue
-        r.raise_for_status()
-        return r
+    if last_exc:
+        raise last_exc
     raise RuntimeError(f"Max retries for {url}")
 
 # ============================
-# Wayback helpers (CDX + fetch)
+# Wayback helpers (CDX + fetch) — ampliado a 24 meses
 # ============================
 def _wayback_cdx(url: str, to_yyyymmdd: str, debug=False) -> Optional[str]:
     api = (
@@ -84,23 +111,38 @@ def _wayback_available(url: str, to_yyyymmdd: str, debug=False) -> Optional[str]
         if debug: print(f"[WB-AV][err] {e}")
         return None
 
-def _wayback_fetch(url: str, target: datetime, debug=False) -> Optional[requests.Response]:
-    to_str = target.strftime("%Y%m%d")
-    ts = _wayback_cdx(url, to_str, debug=debug) or _wayback_available(url, to_str, debug=debug)
-    if not ts:
-        return None
-    wb = f"https://web.archive.org/web/{ts}/{url}"
-    try:
-        r = _S.get(wb, headers=_headers(), timeout=25)
-        if debug: print(f"[WB] {r.status_code} {wb}")
-        r.raise_for_status()
-        return r
-    except Exception as e:
-        if debug: print(f"[WB][err] {e}")
-        return None
+def _wayback_fetch(url: str, target: datetime, debug=False, months_back=24) -> Optional[requests.Response]:
+    """
+    Busca una captura <= target (YYYYMMDD). Si no hay una del mes,
+    intenta hacia atrás hasta 'months_back' meses probando ambas APIs.
+    """
+    def _ts_for(d: datetime) -> str:
+        return d.strftime("%Y%m%d")
+
+    y, m = target.year, target.month
+    for k in range(months_back + 1):
+        yy = y
+        mm = m - k
+        while mm <= 0:
+            yy -= 1
+            mm += 12
+        ts_try = f"{yy:04d}{mm:02d}28"  # fin de mes aproximado
+        ts = _wayback_cdx(url, ts_try, debug=debug) or _wayback_available(url, ts_try, debug=debug)
+        if not ts:
+            continue
+        wb = f"https://web.archive.org/web/{ts}/{url}"
+        try:
+            r = _S.get(wb, headers=_headers(), timeout=25)
+            if debug: print(f"[WB] {r.status_code} {wb}")
+            r.raise_for_status()
+            return r
+        except Exception as e:
+            if debug: print(f"[WB][err] {e} {wb}")
+            continue
+    return None
 
 # ============================
-# Normalización / Mapeos
+# Normalización y slugs
 # ============================
 def _norm(s: str) -> str:
     if not s: return ""
@@ -109,38 +151,45 @@ def _norm(s: str) -> str:
     s = s.lower()
     return re.sub(r"[^a-z0-9]+", "", s)
 
-TEAM_NAME_CANDIDATES: Dict[str, List[str]] = {
-    # (igual que antes; recortado por brevedad)
-    "bar": ["FC Barcelona", "Barcelona"],
-    "rma": ["Real Madrid"],
-    "atm": ["Atlético Madrid", "Atletico Madrid"],
-    "sev": ["Sevilla FC", "Sevilla"],
-    "soc": ["Real Sociedad"],
-    "ath": ["Athletic Club", "Athletic Bilbao"],
-    "bet": ["Real Betis"],
-    "vil": ["Villarreal CF", "Villarreal"],
-    "val": ["Valencia CF", "Valencia"],
-    "cel": ["RC Celta de Vigo", "Celta de Vigo", "Celta Vigo"],
-    "ray": ["Rayo Vallecano"],
-    "gir": ["Girona FC", "Girona"],
-    "get": ["Getafe CF", "Getafe"],
-    "mlr": ["RCD Mallorca", "Mallorca"],
-    "lpa": ["UD Las Palmas", "Las Palmas"],
-    "ala": ["Deportivo Alavés", "Deportivo Alaves", "Alavés", "Alaves"],
-    "gra": ["Granada CF", "Granada"],
-    "osa": ["CA Osasuna", "Osasuna"],
-    # …
-}
+def _normalize(s: str) -> str:
+    norm = unicodedata.normalize("NFKD", s or "")
+    cleaned = "".join(c for c in norm if not unicodedata.combining(c)).lower()
+    return re.sub(r"[\s\.\-’'`_]+", "", cleaned)
 
-def _guess_league_families(slug: str) -> List[str]:
-    s = slug.lower()
-    if s in {"bar","rma","atm","sev","soc","ath","bet","vil","val","cel","ray","gir","get","mlr","lpa","ala","gra","osa"}:
-        return ["laliga"]
-    # añade más si necesitas…
-    return ["laliga","premier","seriea","bundesliga","ligue1"]
+def slugify_team(name: str) -> str:
+    cleaned = _normalize(name)
+    aliases = {
+        # Algunos alias frecuentes
+        "realmadrid":"rma","fcbarcelona":"bar","barcelona":"bar","sevilla":"sev",
+        "atleticodemadrid":"atm","valencia":"val","villarreal":"vil","realbetis":"bet",
+        "realsociedad":"soc","athleticclub":"ath","athleticbilbao":"ath","osasuna":"osa",
+        "celtadevigo":"cel","rayovallecano":"ray","udlaspalmas":"lpa","alaves":"ala",
+        "granadacf":"gra","rcdmallorca":"mlr",
+        "parissaintgermain":"psg","rbleipzig":"rbl",
+        "borussiadortmund":"bvb","bayernmunchen":"bay","bayernmunich":"bay",
+        "olympiquemarseille":"om","olympiquelyonnais":"lyo",
+    }
+    return aliases.get(cleaned, cleaned[:3] if len(cleaned) >= 3 else cleaned)
+
+def _initials_slug(name: str) -> str:
+    tokens = re.findall(r"[A-Za-zÀ-ÿ0-9]+", name or "")
+    IGNORE = {"fc","cf","sc","ac","ud","cd","rcd","ssc","sv","vfl","vfb","rb","as","ss",
+              "ks","ofk","fk","pfc","afc","sk","nk","bk","if","us","sd","deportivo","club",
+              "real","athletic","sporting","hotspur","queens","rangers","city","united","town"}
+    initials = []
+    for t in tokens:
+        t_clean = _norm(t)
+        if not t_clean or t_clean in IGNORE:
+            continue
+        initials.append(t_clean[0])
+    if not initials:
+        for t in tokens:
+            if t.isdigit():
+                initials.append(t[0])
+    return "".join(initials)[:3]
 
 # ============================
-# Familias y Tiers en Transfermarkt
+# Familias y Tiers (1ª/2ª/3ª)
 # ============================
 COMP_FAMILIES: Dict[str, List[Tuple[str, str]]] = {
     "premier": [("GB1", "premier-league"), ("GB2", "championship"), ("GB3", "league-one")],
@@ -150,30 +199,88 @@ COMP_FAMILIES: Dict[str, List[Tuple[str, str]]] = {
     "ligue1":  [("FR1","ligue-1"), ("FR2","ligue-2"), ("FR3","national")],
 }
 
-TM_DOMAINS = [
-    "www.transfermarkt.com",
-    "www.transfermarkt.us",
-    "www.transfermarkt.de",
-    "www.transfermarkt.co.uk",
-]
+def _guess_league_families(slug: str) -> List[str]:
+    s = slug.lower()
+    if s in {"bar","rma","atm","sev","soc","ath","bet","vil","val","cel","ray","gir","get","mlr","lpa","ala","gra","osa"}:
+        return ["laliga"]
+    if s in {"mci","mun","liv","ars","che","tot","new","whu","avl","eve","bha","bre","bou","cry","ful","wol","for","qpr","lee","nor","ips","lei","sou","shf","wba"}:
+        return ["premier"]
+    if s in {"juv","int","mil","nap","rom","laz","ata","fio","tor","bol","gen","sam","cag","emp","udi","par","pal","bre"}:
+        return ["seriea"]
+    if s in {"bay","bvb","rbl","lev","bmg","vfb","wob","sge","svw","scf","fca","kol","m05"}:
+        return ["bundesliga"]
+    if s in {"psg","om","lyo","lil","nic","ren","nan","rcl","rcs","tou","rei","aux","met"}:
+        return ["ligue1"]
+    return ["laliga","premier","seriea","bundesliga","ligue1"]
 
 # ============================
-# Resolver ID y URLs correctas
+# Resolver tm_id con matching robusto + caché
 # ============================
 SLUG_TO_TMID: Dict[str, int] = {
     "bar": 131, "rma": 418, "atm": 13, "sev": 368, "soc": 681, "ath": 621, "bet": 150,
     "vil": 1050, "val": 1049,
-    # añade más si usas otros equipos…
+}
+
+def _load_tmid_cache():
+    global _TMID_CACHE
+    if _TMID_CACHE:
+        return
+    if os.path.exists(TMID_CACHE_FILE):
+        try:
+            with open(TMID_CACHE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    _TMID_CACHE = {k: int(v) for k, v in data.items()}
+        except Exception:
+            _TMID_CACHE = {}
+
+def _save_tmid_cache():
+    if not _TMID_CACHE:
+        return
+    try:
+        with open(TMID_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(_TMID_CACHE, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def _slug_matches_name(slug: str, name: str, candidates: List[str]) -> bool:
+    s = slug.lower().strip()
+    name_norm = _norm(name)
+    if candidates:
+        cand = {_norm(x) for x in candidates}
+        if name_norm in cand:
+            return True
+    if s == _initials_slug(name):
+        return True
+    if s and s in name_norm:
+        return True
+    if s == slugify_team(name):
+        return True
+    return False
+
+TEAM_NAME_CANDIDATES: Dict[str, List[str]] = {
+    # mantener algunos alias “conflictivos”; el resto lo cubre el matcher
+    "bar": ["FC Barcelona", "Barcelona"],
+    "rma": ["Real Madrid"],
+    "sev": ["Sevilla FC", "Sevilla"],
+    "psg": ["Paris Saint-Germain", "PSG"],
+    "rbl": ["RB Leipzig"],
+    "bvb": ["Borussia Dortmund"],
+    "bay": ["Bayern München", "Bayern Munich", "FC Bayern München"],
+    "om":  ["Olympique de Marseille", "Marseille"],
+    "lyo": ["Olympique Lyonnais", "Lyon"],
 }
 
 def _resolve_tm_id_from_league_tables(slug: str, debug=False) -> Optional[int]:
-    candidates = TEAM_NAME_CANDIDATES.get(slug, [])
-    slug_norm = _norm(slug)
+    _load_tmid_cache()
+    if slug in _TMID_CACHE:
+        return _TMID_CACHE[slug]
 
+    candidates = TEAM_NAME_CANDIDATES.get(slug, [])
     families = _guess_league_families(slug)
     for fam in families:
         tiers = COMP_FAMILIES.get(fam, [])
-        for code, path in tiers:
+        for code, path in tiers:  # 1ª, 2ª y 3ª
             for dom in TM_DOMAINS:
                 url = f"https://{dom}/{path}/marktwerteverein/wettbewerb/{code}"
                 try:
@@ -187,33 +294,35 @@ def _resolve_tm_id_from_league_tables(slug: str, debug=False) -> Optional[int]:
                     continue
                 for a in table.select("a[href*='/startseite/verein/']"):
                     name = a.get_text(" ", strip=True)
+                    if not _slug_matches_name(slug, name, candidates):
+                        continue
                     href = a.get("href", "")
-                    # match exacto alias o heurístico
-                    if candidates and _norm(name) in {_norm(x) for x in candidates}:
-                        m = re.search(r"/startseite/verein/(\d+)/", href)
-                        if m:
-                            tm_id = int(m.group(1)); 
-                            if debug: print(f"[ID] {name} -> {tm_id} ({fam} {code})")
-                            return tm_id
-                    if not candidates and slug_norm and slug_norm in _norm(name):
-                        m = re.search(r"/startseite/verein/(\d+)/", href)
-                        if m:
-                            tm_id = int(m.group(1));
-                            if debug: print(f"[ID-heur] {name} -> {tm_id} ({fam} {code})")
-                            return tm_id
+                    m = re.search(r"/startseite/verein/(\d+)/", href)
+                    if m:
+                        tm_id = int(m.group(1))
+                        if debug: print(f"[ID] {name} -> {tm_id} ({fam} {code})")
+                        _TMID_CACHE[slug] = tm_id
+                        _save_tmid_cache()
+                        return tm_id
     return None
 
-# === NUEVAS URLs de club (vigentes) para encontrar la serie/valor ===
+# ============================
+# Generar muchas rutas candidatas del club
+# ============================
 def _club_candidate_urls(tm_id: int, year: int) -> List[str]:
     """
-    Rutas actuales que suelen incluir la serie Highcharts de valor de mercado
-    o, al menos, el “Total market value” impreso.
+    Cobertura amplia de rutas actuales e históricas donde puede estar la serie/literal.
     """
     paths = [
-        f"/startseite/verein/{tm_id}",                          # Home del club
-        f"/datenfakten/verein/{tm_id}",                         # Datos/Facts
-        f"/kader/verein/{tm_id}/saison_id/{year}/plus/1",       # Plantilla por temporada (detalle)
-        f"/kader/verein/{tm_id}",                               # Plantilla (general)
+        f"/startseite/verein/{tm_id}",
+        f"/datenfakten/verein/{tm_id}",
+        f"/kader/verein/{tm_id}/saison_id/{year}/plus/1",
+        f"/kader/verein/{tm_id}",
+        # históricas / alternas
+        f"/verein/{tm_id}/marktwertentwicklung",
+        f"/verein/{tm_id}/historie/marktwertverein",
+        f"/verein/{tm_id}/historie/marktwertentwicklung",
+        f"/profil/verein/{tm_id}/marktwert",
     ]
     urls = []
     for dom in TM_DOMAINS:
@@ -222,9 +331,9 @@ def _club_candidate_urls(tm_id: int, year: int) -> List[str]:
     return urls
 
 # ============================
-# Parser serie (Highcharts) + fallback “Total market value”
+# Parsers de valores (serie + literals)
 # ============================
-# Highcharts: [ Date.UTC(y, m, d) , value ]  /  [ 1709760000000 , value ]
+# Highcharts series
 _PAIR_RE = re.compile(
     r"\[\s*(?:Date\.UTC\(\s*(\d{4})\s*,\s*(\d{1,2})\s*,\s*(\d{1,2})\s*\)|(\d{10,13}))\s*,\s*([0-9eE\+\-\.]+)\s*\]",
     re.MULTILINE
@@ -263,84 +372,102 @@ def _format_eur(value: float) -> str:
         return f"€{value/1_000_000_000:.2f}bn"
     return f"€{value/1_000_000:.2f}m"
 
-# Fallback: “Total market value” impreso en la página (no histórico, pero útil)
-_TOTAL_VALUE_RE = re.compile(
-    r"(Total\s+market\s+value|Gesamtmarktwert|Valor\s+de\s+mercado|Valeur\s+marchande).*?€\s?([\d\.\,]+)\s*(bn|m)?",
+# Literales: admitimos bn/m, Mio., Mrd., millones crudos, etc.
+_LITERAL_BLOCK_RE = re.compile(
+    r"(Total\s*market\s*value|Gesamtmarktwert|Valor\s*de\s*mercado|Valeur\s*marchande|Valore\s*di\s*mercato)[^€]*€\s*([0-9\.\,]+)\s*(bn|m|mio\.?|mrd\.?)?",
     re.IGNORECASE | re.DOTALL
 )
 
 def _extract_total_value_literal(html: str) -> Optional[str]:
-    m = _TOTAL_VALUE_RE.search(html)
+    m = _LITERAL_BLOCK_RE.search(html)
     if not m:
         return None
-    num = m.group(2).replace(".", "").replace(",", ".")
-    unit = (m.group(3) or "").lower()
+    raw_num = m.group(2).strip()
+    unit = (m.group(3) or "").lower().replace(" ", "")
+
+    # Normalizar número con . y ,
+    # Aleman/Español: "1.234,56" -> 1234.56
+    num = raw_num.replace(".", "").replace(",", ".")
     try:
         val = float(num)
     except Exception:
         return None
-    # Si la página ya imprime en bn/m, respétalo
-    if unit == "bn":
+
+    # Interpretación de unidades
+    if unit in ("bn", "mrd", "mrd."):
+        # algunos sitios pueden imprimir "1,2" como bn directamente
         return f"€{val:.2f}bn"
-    if unit == "m" or unit == "":
-        # muchas veces ya viene en “m”
-        if unit == "m":
-            return f"€{val:.2f}m"
-        # si no hay unidad explícita, asumir millones si el número es grande
-        if val > 1_000_000:  # por si viene crudo en euros (raro)
-            return _format_eur(val)
+    if unit in ("m", "mio", "mio."):
         return f"€{val:.2f}m"
+
+    # Sin unidad: si es muy grande, formatear
+    if val >= 1_000_000_000:    # ya en euros crudos
+        return _format_eur(val)
+    if val >= 1_000_000:
+        return _format_eur(val)
+    # Si es un número pequeño sin unidad, asume millones (casos raros)
+    return f"€{val:.2f}m"
+
+def _extract_total_value_from_sidebar(soup: BeautifulSoup) -> Optional[str]:
+    """
+    Busca el literal en bloques comunes: sidebar, encabezados, “facts and figures”, etc.
+    """
+    text = soup.get_text(" ", strip=True)
+    return _extract_total_value_literal(text)
+
+def _extract_value_from_html(html: str, target: datetime, debug=False) -> Optional[str]:
+    # 1) Serie
+    pts = _extract_series_points(html)
+    if pts:
+        v = _pick_value_at_or_before(pts, target)
+        if v is not None:
+            return _format_eur(v)
+    # 2) Literal en texto
+    lit = _extract_total_value_literal(html)
+    if lit:
+        return lit
+    # 3) Como fallback: parsear con BS y buscar literal en sidebar/bloques
+    try:
+        soup = BeautifulSoup(html, "html.parser")
+        lit2 = _extract_total_value_from_sidebar(soup)
+        if lit2:
+            return lit2
+    except Exception:
+        pass
     return None
 
+# ============================
+# Fases de extracción (live y wayback)
+# ============================
 def _extract_value_from_club_pages(tm_id: int, target: datetime, debug=False) -> Optional[str]:
-    """
-    Intenta 1) serie histórica en páginas actuales; 2) literal de “Total market value”.
-    Si live falla, intenta con Wayback respetando la fecha objetivo (mes/año).
-    """
     year = target.year
     urls = _club_candidate_urls(tm_id, year)
 
-    # LIVE
+    # LIVE: probar todas las URLs y dominios
     for url in urls:
         try:
             r = _robust_get(url, debug=debug)
+            val = _extract_value_from_html(r.text, target, debug=debug)
+            if val:
+                if debug: print(f"[OK][LIVE] {url} -> {val}")
+                return val
         except Exception:
             continue
-        html = r.text
-        # 1) Intentar serie
-        pts = _extract_series_points(html)
-        if pts:
-            v = _pick_value_at_or_before(pts, target)
-            if v is not None:
-                if debug: print(f"[OK][HIST-LIVE] {url} -> {v}")
-                return _format_eur(v)
-        # 2) Fallback literal
-        literal = _extract_total_value_literal(html)
-        if literal:
-            if debug: print(f"[OK][LITERAL-LIVE] {url} -> {literal}")
-            return literal
 
-    # WAYBACK (prueba mismas URLs)
+    # WAYBACK: probar todas las URLs con búsqueda agresiva hasta 24 meses atrás
     for url in urls:
-        wb = _wayback_fetch(url, target, debug=debug)
+        wb = _wayback_fetch(url, target, debug=debug, months_back=24)
         if not wb:
             continue
-        html = wb.text
-        pts = _extract_series_points(html)
-        if pts:
-            v = _pick_value_at_or_before(pts, target)
-            if v is not None:
-                if debug: print(f"[OK][HIST-WB] {url} -> {v}")
-                return _format_eur(v)
-        literal = _extract_total_value_literal(html)
-        if literal:
-            if debug: print(f"[OK][LITERAL-WB] {url} -> {literal}")
-            return literal
+        val = _extract_value_from_html(wb.text, target, debug=debug)
+        if val:
+            if debug: print(f"[OK][WB] {url} -> {val}")
+            return val
 
     return None
 
 # ============================
-# Tablas por liga (fallback ya existente)
+# Tablas por liga (fallback potente)
 # ============================
 def _select_value_table(soup: BeautifulSoup) -> Optional[BeautifulSoup]:
     tables = soup.select("table.items") or soup.find_all("table")
@@ -352,7 +479,7 @@ def _select_value_table(soup: BeautifulSoup) -> Optional[BeautifulSoup]:
         if not any(k in header for k in ("club", "verein", "equipo", "équipe", "squadra")):
             continue
         euro_hits = 0
-        for tr in t.select("tbody tr")[:12]:
+        for tr in t.select("tbody tr")[:15]:
             if "€" in tr.get_text() or "â‚¬" in tr.get_text():
                 euro_hits += 1
         if euro_hits >= 3:
@@ -413,7 +540,7 @@ def _find_value_col_index(table: BeautifulSoup, cutoff_date: Optional[datetime]=
     rows = table.select("tbody tr")
     for col in range(min(12, len(ths))):
         euros_count = 0
-        for tr in rows[:10]:
+        for tr in rows[:12]:
             tds = tr.find_all("td")
             if col < len(tds):
                 cell = (tds[col].get_text(" ", strip=True) or "")
@@ -442,7 +569,11 @@ def _find_value_for_team(table: BeautifulSoup, team_candidates: List[str], cutof
             continue
         raw = tds[vcol].get_text(" ", strip=True)
         if raw:
-            return raw.replace("â‚¬", "€")
+            txt = raw.replace("â‚¬", "€")
+            # Si viene como “€ 350.00 m” o “€ 1.2 bn”, usa los parsers literales
+            lit = _extract_total_value_literal(f"Total market value € {txt}")
+            if lit:
+                return lit
     return None
 
 def _try_league_tables_all_tiers(family: str, target: datetime, candidates: List[str], slug: str, debug=False) -> Optional[str]:
@@ -468,7 +599,7 @@ def _try_league_tables_all_tiers(family: str, target: datetime, candidates: List
                 if val:
                     if debug: print(f"[OK][LIVE-LIGA]{family} {code} -> {val}")
                     return val
-    # WAYBACK (±12 meses)
+    # WAYBACK (hasta 24 meses atrás)
     def _month_back_iter(d: datetime, months: int):
         y, m = d.year, d.month
         for k in range(months+1):
@@ -482,12 +613,12 @@ def _try_league_tables_all_tiers(family: str, target: datetime, candidates: List
     for code, path in tiers:
         for dom in TM_DOMAINS:
             base = f"https://{dom}/{path}/marktwerteverein/wettbewerb/{code}"
-            for yy, mm in _month_back_iter(target, 12):
+            for yy, mm in _month_back_iter(target, 24):
                 month_iso = f"{yy:04d}-{mm:02d}-01"
                 month_date = datetime(yy, mm, 1)
                 for suf in (f"/stichtag/{month_iso}/plus/", f"/stichtag/{month_iso}/"):
                     url = base + suf
-                    wb = _wayback_fetch(url, target, debug=debug)
+                    wb = _wayback_fetch(url, target, debug=debug, months_back=0)  # usar snapshot del propio mes_iso si existe
                     if not wb:
                         continue
                     soup = BeautifulSoup(wb.text, "html.parser")
@@ -501,16 +632,46 @@ def _try_league_tables_all_tiers(family: str, target: datetime, candidates: List
     return None
 
 # ============================
+# Caché de valores (slug+YYYYMM)
+# ============================
+def _load_value_cache():
+    global _VALUE_CACHE
+    if _VALUE_CACHE:
+        return
+    if os.path.exists(VALUE_CACHE_FILE):
+        try:
+            with open(VALUE_CACHE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, dict):
+                    _VALUE_CACHE = {k: str(v) for k, v in data.items()}
+        except Exception:
+            _VALUE_CACHE = {}
+
+def _save_value_cache():
+    if not _VALUE_CACHE:
+        return
+    try:
+        with open(VALUE_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump(_VALUE_CACHE, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+def _cache_key(slug: str, dt: datetime) -> str:
+    return f"{slug}|{dt.strftime('%Y%m')}"
+
+# ============================
 # API principal
 # ============================
 def get_team_value(slug_equipo: str, fecha: str, debug: bool=False) -> Optional[str]:
     """
     Devuelve el valor de mercado del equipo (ej. '€1.11bn' o '€462.10m')
-    para la fecha dada (dd/mm/aa), cubriendo 1ª–3ª división en las 5 grandes ligas.
-    Estrategia:
-      1) Resolver TM ID (mapa o tablas 1–3).
-      2) Intentar páginas vigentes del club (home/datos/kader) -> serie Highcharts o 'Total market value'.
-      3) Fallback: tablas por liga (live; si no, Wayback ±12 meses).
+    para la fecha dada (dd/mm/aa), con:
+      - Resolución tm_id robusta (1ª–2ª–3ª top-5)
+      - Páginas del club (home/datos/kader/histórico/perfil)
+      - Parsers de Highcharts + literales multi-idioma
+      - Wayback agresivo (hasta 24 meses atrás)
+      - Fallback en tablas por liga (live + wayback)
+      - Caché local de tm_id y valores
     """
     try:
         target = datetime.strptime(fecha.strip(), "%d/%m/%y")
@@ -518,27 +679,37 @@ def get_team_value(slug_equipo: str, fecha: str, debug: bool=False) -> Optional[
         raise ValueError("La fecha debe ser dd/mm/aa (ej. '06/10/05').")
 
     slug = slug_equipo.lower().strip()
+    _load_value_cache()
+
+    # cache mensual (reduce muchísimas peticiones al navegar varias veces por la misma época)
+    ck = _cache_key(slug, target)
+    if ck in _VALUE_CACHE:
+        return _VALUE_CACHE[ck]
+
     candidates = TEAM_NAME_CANDIDATES.get(slug, [])
 
-    # 1) Resolver TM ID
+    # 1) Resolver TM ID: mapa breve -> caché -> scraping por ligas
     tm_id = SLUG_TO_TMID.get(slug)
     if tm_id is None:
-        if debug: print("[ID] Resolviendo TM ID desde tablas 1–3…")
         tm_id = _resolve_tm_id_from_league_tables(slug, debug=debug)
 
-    # 2) Páginas vigentes del club (serie o literal)
+    # 2) Páginas del club (live + wayback) con múltiples rutas
     if tm_id is not None:
         val = _extract_value_from_club_pages(tm_id, target, debug=debug)
         if val:
+            _VALUE_CACHE[ck] = val
+            _save_value_cache()
             return val
 
-    # 3) Fallback: tablas por liga
+    # 3) Fallback: tablas por liga (live + wayback extendido)
     families = _guess_league_families(slug)
     for fam in families:
         val = _try_league_tables_all_tiers(fam, target, candidates, slug, debug=debug)
         if val:
+            _VALUE_CACHE[ck] = val
+            _save_value_cache()
             return val
 
     if debug:
-        print("No se pudo obtener el valor de mercado (club pages y tablas por liga fallaron).")
+        print("No se pudo obtener el valor de mercado (club pages + tablas por liga fallaron).")
     return None

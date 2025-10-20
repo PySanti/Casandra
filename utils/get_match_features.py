@@ -7,8 +7,8 @@ def get_match_features(slug, date, ligue):
                   TeamData(local_team),
                   TeamData(away_team),
         )
-#    print("Buscando data de performance")
-#    match.set_performance_data()
+    print("Buscando data de performance")
+    match.set_performance_data()
     print("Buscando elos de equipos")
     match.set_teams_elo()
     print("Buscando resultado del encuentro")
