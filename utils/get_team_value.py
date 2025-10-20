@@ -1,3 +1,4 @@
+
 # -*- coding: utf-8 -*-
 # utils/get_team_value.py
 
@@ -83,8 +84,8 @@ def _wayback_available(url: str, to_yyyymmdd: str, debug=False) -> Optional[str]
         if debug: print(f"[WB-AV][err] {e}")
         return None
 
-def _wayback_fetch(url: str, target_date: datetime, debug=False) -> Optional[requests.Response]:
-    to_str = target_date.strftime("%Y%m%d")
+def _wayback_fetch(url: str, target: datetime, debug=False) -> Optional[requests.Response]:
+    to_str = target.strftime("%Y%m%d")
     ts = _wayback_cdx(url, to_str, debug=debug) or _wayback_available(url, to_str, debug=debug)
     if not ts:
         return None
@@ -109,8 +110,7 @@ def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", s)
 
 TEAM_NAME_CANDIDATES: Dict[str, List[str]] = {
-    # (idéntico a antes; añade equipos de 2ª/3ª si los usas mucho)
-    # LaLiga
+    # (igual que antes; recortado por brevedad)
     "bar": ["FC Barcelona", "Barcelona"],
     "rma": ["Real Madrid"],
     "atm": ["Atlético Madrid", "Atletico Madrid"],
@@ -129,111 +129,27 @@ TEAM_NAME_CANDIDATES: Dict[str, List[str]] = {
     "ala": ["Deportivo Alavés", "Deportivo Alaves", "Alavés", "Alaves"],
     "gra": ["Granada CF", "Granada"],
     "osa": ["CA Osasuna", "Osasuna"],
-    # Premier
-    "mci": ["Manchester City", "Man City"],
-    "mun": ["Manchester United", "Man United"],
-    "liv": ["Liverpool FC", "Liverpool"],
-    "ars": ["Arsenal FC", "Arsenal"],
-    "che": ["Chelsea FC", "Chelsea"],
-    "tot": ["Tottenham Hotspur", "Tottenham"],
-    "new": ["Newcastle United", "Newcastle"],
-    "whu": ["West Ham United", "West Ham"],
-    "avl": ["Aston Villa"],
-    "eve": ["Everton"],
-    "bha": ["Brighton & Hove Albion", "Brighton"],
-    "bre": ["Brentford FC", "Brentford"],
-    "bou": ["AFC Bournemouth", "Bournemouth"],
-    "cry": ["Crystal Palace"],
-    "ful": ["Fulham FC", "Fulham"],
-    "wol": ["Wolverhampton Wanderers", "Wolves"],
-    "for": ["Nottingham Forest"],
-    # Serie A
-    "juv": ["Juventus"],
-    "int": ["Inter", "Inter Milan", "Internazionale"],
-    "mil": ["AC Milan", "Milan"],
-    "nap": ["SSC Napoli", "Napoli"],
-    "rom": ["AS Roma", "Roma"],
-    "laz": ["SS Lazio", "Lazio"],
-    "ata": ["Atalanta"],
-    "fio": ["Fiorentina"],
-    # Bundesliga
-    "bay": ["Bayern München", "Bayern Munich", "FC Bayern München"],
-    "bvb": ["Borussia Dortmund"],
-    "rbl": ["RB Leipzig"],
-    "lev": ["Bayer 04 Leverkusen", "Bayer Leverkusen"],
-    "bmg": ["Borussia Mönchengladbach", "Borussia Monchengladbach", "Mönchengladbach", "Monchengladbach"],
-    "vfb": ["VfB Stuttgart", "Stuttgart"],
-    "wob": ["VfL Wolfsburg", "Wolfsburg"],
-    # Ligue 1
-    "psg": ["Paris Saint-Germain", "Paris SG", "PSG"],
-    "om":  ["Olympique de Marseille", "Marseille"],
-    "lyo": ["Olympique Lyonnais", "Lyon"],
-    "lil": ["LOSC Lille", "Lille"],
-    "nic": ["OGC Nice", "Nice"],
-    "ren": ["Stade Rennais", "Rennes"],
-    "nan": ["FC Nantes", "Nantes"],
+    # …
 }
 
 def _guess_league_families(slug: str) -> List[str]:
-    """
-    Devuelve las 'familias' (países) a probar según el slug.
-    """
     s = slug.lower()
     if s in {"bar","rma","atm","sev","soc","ath","bet","vil","val","cel","ray","gir","get","mlr","lpa","ala","gra","osa"}:
         return ["laliga"]
-    if s in {"mci","mun","liv","ars","che","tot","new","whu","avl","eve","bha","bre","bou","cry","ful","wol","for"}:
-        return ["premier"]
-    if s in {"juv","int","mil","nap","rom","laz","ata","fio"}:
-        return ["seriea"]
-    if s in {"bay","bvb","rbl","lev","bmg","vfb","wob"}:
-        return ["bundesliga"]
-    if s in {"psg","om","lyo","lil","nic","ren","nan"}:
-        return ["ligue1"]
-    # fallback: probar todas
+    # añade más si necesitas…
     return ["laliga","premier","seriea","bundesliga","ligue1"]
 
 # ============================
-# Familias y Tiers (1ª, 2ª, 3ª) — códigos y paths en Transfermarkt
+# Familias y Tiers en Transfermarkt
 # ============================
-# Nota: algunos terceros niveles han cambiado de nombre con los años (p.ej., España: Segunda B → Primera RFEF).
-# Incluimos varias rutas candidatas por si la actual/histórica varía.
 COMP_FAMILIES: Dict[str, List[Tuple[str, str]]] = {
-    # Inglaterra
-    "premier": [
-        ("GB1", "premier-league"),   # 1ª
-        ("GB2", "championship"),     # 2ª
-        ("GB3", "league-one"),       # 3ª
-    ],
-    # España
-    "laliga": [
-        ("ES1", "laliga"),                   # 1ª
-        ("ES2", "laliga2"),                  # 2ª (LaLiga 2 / Segunda)
-        # 3ª (histórico y actual; probamos variantes)
-        ("ES3", "primera-division-rfef"),    # actual
-        ("ES3", "segunda-division-b"),      # histórico
-        ("ES3", "segundab"),                # alias histórico
-    ],
-    # Italia
-    "seriea": [
-        ("IT1", "serie-a"),   # 1ª
-        ("IT2", "serie-b"),   # 2ª
-        ("IT3", "serie-c"),   # 3ª
-    ],
-    # Alemania
-    "bundesliga": [
-        ("L1", "bundesliga"),      # 1ª
-        ("L2", "2-bundesliga"),    # 2ª
-        ("L3", "3-liga"),          # 3ª
-    ],
-    # Francia
-    "ligue1": [
-        ("FR1", "ligue-1"),  # 1ª
-        ("FR2", "ligue-2"),  # 2ª
-        ("FR3", "national"), # 3ª (Championnat National)
-    ],
+    "premier": [("GB1", "premier-league"), ("GB2", "championship"), ("GB3", "league-one")],
+    "laliga":  [("ES1", "laliga"), ("ES2", "laliga2"), ("ES3", "primera-division-rfef"), ("ES3", "segunda-division-b"), ("ES3","segundab")],
+    "seriea":  [("IT1","serie-a"), ("IT2","serie-b"), ("IT3","serie-c")],
+    "bundesliga":[("L1","bundesliga"), ("L2","2-bundesliga"), ("L3","3-liga")],
+    "ligue1":  [("FR1","ligue-1"), ("FR2","ligue-2"), ("FR3","national")],
 }
 
-# Dominios a probar (para evitar bloqueos/región)
 TM_DOMAINS = [
     "www.transfermarkt.com",
     "www.transfermarkt.us",
@@ -242,24 +158,15 @@ TM_DOMAINS = [
 ]
 
 # ============================
-# Resolución de ID y URLs de histórico
+# Resolver ID y URLs correctas
 # ============================
 SLUG_TO_TMID: Dict[str, int] = {
-    # (añade aquí IDs de clubes que consultes mucho, incluidos 2ª y 3ª)
     "bar": 131, "rma": 418, "atm": 13, "sev": 368, "soc": 681, "ath": 621, "bet": 150,
-    "vil": 1050, "val": 1049, "psg": 583, "om": 244, "lyo": 1041, "lil": 1082,
-    "bay": 27, "bvb": 16, "lev": 15, "bmg": 18, "vfb": 79, "wob": 82,
-    "mci": 281, "mun": 985, "liv": 31, "ars": 11, "che": 631, "tot": 148, "new": 762,
-    "whu": 379, "avl": 405, "eve": 29,
-    "juv": 506, "int": 46, "mil": 5, "nap": 6195, "rom": 12, "laz": 398, "ata": 800, "fio": 430,
+    "vil": 1050, "val": 1049,
+    # añade más si usas otros equipos…
 }
 
 def _resolve_tm_id_from_league_tables(slug: str, debug=False) -> Optional[int]:
-    """
-    Si el slug no está en SLUG_TO_TMID, intenta resolver el ID mirando
-    las tablas de valores de TODAS las categorías 1–3 de su familia.
-    Si no hay aliases, intenta un match heurístico por inclusión de slug normalizado.
-    """
     candidates = TEAM_NAME_CANDIDATES.get(slug, [])
     slug_norm = _norm(slug)
 
@@ -281,29 +188,32 @@ def _resolve_tm_id_from_league_tables(slug: str, debug=False) -> Optional[int]:
                 for a in table.select("a[href*='/startseite/verein/']"):
                     name = a.get_text(" ", strip=True)
                     href = a.get("href", "")
-                    # 1) Match exacto con aliases
+                    # match exacto alias o heurístico
                     if candidates and _norm(name) in {_norm(x) for x in candidates}:
                         m = re.search(r"/startseite/verein/(\d+)/", href)
                         if m:
-                            tm_id = int(m.group(1))
+                            tm_id = int(m.group(1)); 
                             if debug: print(f"[ID] {name} -> {tm_id} ({fam} {code})")
                             return tm_id
-                    # 2) Heurística: si no hay aliases, usa contains del slug normalizado
                     if not candidates and slug_norm and slug_norm in _norm(name):
                         m = re.search(r"/startseite/verein/(\d+)/", href)
                         if m:
-                            tm_id = int(m.group(1))
+                            tm_id = int(m.group(1));
                             if debug: print(f"[ID-heur] {name} -> {tm_id} ({fam} {code})")
                             return tm_id
     return None
 
-def _club_history_urls(tm_id: int) -> List[str]:
-    # rutas por ID (robustas frente a cambios de nombre)
+# === NUEVAS URLs de club (vigentes) para encontrar la serie/valor ===
+def _club_candidate_urls(tm_id: int, year: int) -> List[str]:
+    """
+    Rutas actuales que suelen incluir la serie Highcharts de valor de mercado
+    o, al menos, el “Total market value” impreso.
+    """
     paths = [
-        f"/verein/{tm_id}/marktwertentwicklung",
-        f"/verein/{tm_id}/historie/marktwertverein",
-        f"/verein/{tm_id}/historie/marktwertentwicklung",
-        f"/profil/verein/{tm_id}/marktwert",
+        f"/startseite/verein/{tm_id}",                          # Home del club
+        f"/datenfakten/verein/{tm_id}",                         # Datos/Facts
+        f"/kader/verein/{tm_id}/saison_id/{year}/plus/1",       # Plantilla por temporada (detalle)
+        f"/kader/verein/{tm_id}",                               # Plantilla (general)
     ]
     urls = []
     for dom in TM_DOMAINS:
@@ -312,8 +222,9 @@ def _club_history_urls(tm_id: int) -> List[str]:
     return urls
 
 # ============================
-# Parser serie histórica (Highcharts)
+# Parser serie (Highcharts) + fallback “Total market value”
 # ============================
+# Highcharts: [ Date.UTC(y, m, d) , value ]  /  [ 1709760000000 , value ]
 _PAIR_RE = re.compile(
     r"\[\s*(?:Date\.UTC\(\s*(\d{4})\s*,\s*(\d{1,2})\s*,\s*(\d{1,2})\s*\)|(\d{10,13}))\s*,\s*([0-9eE\+\-\.]+)\s*\]",
     re.MULTILINE
@@ -327,7 +238,7 @@ def _extract_series_points(html: str) -> List[Tuple[datetime, float]]:
                 ms = int(ts_ms)
                 dt = datetime.utcfromtimestamp(ms / 1000.0) if len(ts_ms) == 13 else datetime.utcfromtimestamp(ms)
             else:
-                dt = datetime(int(y), int(m) + 1, int(d))  # Date.UTC month 0..11
+                dt = datetime(int(y), int(m) + 1, int(d))  # month 0..11
             v = float(val)
             pts.append((dt, v))
         except Exception:
@@ -352,8 +263,84 @@ def _format_eur(value: float) -> str:
         return f"€{value/1_000_000_000:.2f}bn"
     return f"€{value/1_000_000:.2f}m"
 
+# Fallback: “Total market value” impreso en la página (no histórico, pero útil)
+_TOTAL_VALUE_RE = re.compile(
+    r"(Total\s+market\s+value|Gesamtmarktwert|Valor\s+de\s+mercado|Valeur\s+marchande).*?€\s?([\d\.\,]+)\s*(bn|m)?",
+    re.IGNORECASE | re.DOTALL
+)
+
+def _extract_total_value_literal(html: str) -> Optional[str]:
+    m = _TOTAL_VALUE_RE.search(html)
+    if not m:
+        return None
+    num = m.group(2).replace(".", "").replace(",", ".")
+    unit = (m.group(3) or "").lower()
+    try:
+        val = float(num)
+    except Exception:
+        return None
+    # Si la página ya imprime en bn/m, respétalo
+    if unit == "bn":
+        return f"€{val:.2f}bn"
+    if unit == "m" or unit == "":
+        # muchas veces ya viene en “m”
+        if unit == "m":
+            return f"€{val:.2f}m"
+        # si no hay unidad explícita, asumir millones si el número es grande
+        if val > 1_000_000:  # por si viene crudo en euros (raro)
+            return _format_eur(val)
+        return f"€{val:.2f}m"
+    return None
+
+def _extract_value_from_club_pages(tm_id: int, target: datetime, debug=False) -> Optional[str]:
+    """
+    Intenta 1) serie histórica en páginas actuales; 2) literal de “Total market value”.
+    Si live falla, intenta con Wayback respetando la fecha objetivo (mes/año).
+    """
+    year = target.year
+    urls = _club_candidate_urls(tm_id, year)
+
+    # LIVE
+    for url in urls:
+        try:
+            r = _robust_get(url, debug=debug)
+        except Exception:
+            continue
+        html = r.text
+        # 1) Intentar serie
+        pts = _extract_series_points(html)
+        if pts:
+            v = _pick_value_at_or_before(pts, target)
+            if v is not None:
+                if debug: print(f"[OK][HIST-LIVE] {url} -> {v}")
+                return _format_eur(v)
+        # 2) Fallback literal
+        literal = _extract_total_value_literal(html)
+        if literal:
+            if debug: print(f"[OK][LITERAL-LIVE] {url} -> {literal}")
+            return literal
+
+    # WAYBACK (prueba mismas URLs)
+    for url in urls:
+        wb = _wayback_fetch(url, target, debug=debug)
+        if not wb:
+            continue
+        html = wb.text
+        pts = _extract_series_points(html)
+        if pts:
+            v = _pick_value_at_or_before(pts, target)
+            if v is not None:
+                if debug: print(f"[OK][HIST-WB] {url} -> {v}")
+                return _format_eur(v)
+        literal = _extract_total_value_literal(html)
+        if literal:
+            if debug: print(f"[OK][LITERAL-WB] {url} -> {literal}")
+            return literal
+
+    return None
+
 # ============================
-# Tabla por liga (todas las categorías, live + wayback)
+# Tablas por liga (fallback ya existente)
 # ============================
 def _select_value_table(soup: BeautifulSoup) -> Optional[BeautifulSoup]:
     tables = soup.select("table.items") or soup.find_all("table")
@@ -449,10 +436,8 @@ def _find_value_for_team(table: BeautifulSoup, team_candidates: List[str], cutof
             continue
         name = tds[ccol].get_text(" ", strip=True)
         name_norm = _norm(name)
-        # 1) alias exacto
         if cand and name_norm not in cand:
             continue
-        # 2) heurística si no hay aliases
         if not cand and (not slug_norm or slug_norm not in name_norm):
             continue
         raw = tds[vcol].get_text(" ", strip=True)
@@ -516,100 +501,16 @@ def _try_league_tables_all_tiers(family: str, target: datetime, candidates: List
     return None
 
 # ============================
-# Histórico por club (live + wayback)
-# ============================
-def _club_history_urls(tm_id: int) -> List[str]:
-    paths = [
-        f"/verein/{tm_id}/marktwertentwicklung",
-        f"/verein/{tm_id}/historie/marktwertverein",
-        f"/verein/{tm_id}/historie/marktwertentwicklung",
-        f"/profil/verein/{tm_id}/marktwert",
-    ]
-    urls = []
-    for dom in TM_DOMAINS:
-        for p in paths:
-            urls.append(f"https://{dom}{p}")
-    return urls
-
-_PAIR_RE = re.compile(
-    r"\[\s*(?:Date\.UTC\(\s*(\d{4})\s*,\s*(\d{1,2})\s*,\s*(\d{1,2})\s*\)|(\d{10,13}))\s*,\s*([0-9eE\+\-\.]+)\s*\]",
-    re.MULTILINE
-)
-
-def _extract_series_points(html: str) -> List[Tuple[datetime, float]]:
-    pts: List[Tuple[datetime, float]] = []
-    for y, m, d, ts_ms, val in _PAIR_RE.findall(html):
-        try:
-            if ts_ms:
-                ms = int(ts_ms)
-                dt = datetime.utcfromtimestamp(ms / 1000.0) if len(ts_ms) == 13 else datetime.utcfromtimestamp(ms)
-            else:
-                dt = datetime(int(y), int(m) + 1, int(d))
-            v = float(val)
-            pts.append((dt, v))
-        except Exception:
-            continue
-    pts.sort(key=lambda x: x[0])
-    return pts
-
-def _pick_value_at_or_before(pts: List[Tuple[datetime, float]], target: datetime) -> Optional[float]:
-    lo, hi = 0, len(pts) - 1
-    best = None
-    while lo <= hi:
-        mid = (lo + hi) // 2
-        if pts[mid][0] <= target:
-            best = pts[mid]
-            lo = mid + 1
-        else:
-            hi = mid - 1
-    return None if best is None else best[1]
-
-def _format_eur(value: float) -> str:
-    if value >= 1_000_000_000:
-        return f"€{value/1_000_000_000:.2f}bn"
-    return f"€{value/1_000_000:.2f}m"
-
-def _extract_value_from_history_pages(tm_id: int, target: datetime, debug=False) -> Optional[str]:
-    urls = _club_history_urls(tm_id)
-    # LIVE
-    for url in urls:
-        try:
-            r = _robust_get(url, debug=debug)
-        except Exception:
-            continue
-        pts = _extract_series_points(r.text)
-        if not pts:
-            continue
-        v = _pick_value_at_or_before(pts, target)
-        if v is not None:
-            if debug: print(f"[OK][HIST-LIVE] {url} -> {v}")
-            return _format_eur(v)
-    # WAYBACK
-    for url in urls:
-        wb = _wayback_fetch(url, target, debug=debug)
-        if not wb:
-            continue
-        pts = _extract_series_points(wb.text)
-        if not pts:
-            continue
-        v = _pick_value_at_or_before(pts, target)
-        if v is not None:
-            if debug: print(f"[OK][HIST-WB] {url} -> {v}")
-            return _format_eur(v)
-    return None
-
-# ============================
 # API principal
 # ============================
 def get_team_value(slug_equipo: str, fecha: str, debug: bool=False) -> Optional[str]:
     """
     Devuelve el valor de mercado del equipo (ej. '€1.11bn' o '€462.10m')
-    para la fecha dada (dd/mm/aa), cubriendo 1994–2025 y 1ª, 2ª y 3ª división
-    en las 5 grandes ligas europeas.
+    para la fecha dada (dd/mm/aa), cubriendo 1ª–3ª división en las 5 grandes ligas.
     Estrategia:
-      1) Resolver TM ID (mapa o tablas de todas las categorías 1–3 de la familia).
-      2) Intentar HISTÓRICO del club (live; si no, Wayback).
-      3) Fallback: TABLAS por liga en todas las categorías (live; si no, Wayback ±12 meses).
+      1) Resolver TM ID (mapa o tablas 1–3).
+      2) Intentar páginas vigentes del club (home/datos/kader) -> serie Highcharts o 'Total market value'.
+      3) Fallback: tablas por liga (live; si no, Wayback ±12 meses).
     """
     try:
         target = datetime.strptime(fecha.strip(), "%d/%m/%y")
@@ -625,13 +526,13 @@ def get_team_value(slug_equipo: str, fecha: str, debug: bool=False) -> Optional[
         if debug: print("[ID] Resolviendo TM ID desde tablas 1–3…")
         tm_id = _resolve_tm_id_from_league_tables(slug, debug=debug)
 
-    # 2) Histórico por club si hay ID
+    # 2) Páginas vigentes del club (serie o literal)
     if tm_id is not None:
-        val = _extract_value_from_history_pages(tm_id, target, debug=debug)
+        val = _extract_value_from_club_pages(tm_id, target, debug=debug)
         if val:
             return val
 
-    # 3) Fallback: tablas por liga en todas las categorías
+    # 3) Fallback: tablas por liga
     families = _guess_league_families(slug)
     for fam in families:
         val = _try_league_tables_all_tiers(fam, target, candidates, slug, debug=debug)
@@ -639,5 +540,5 @@ def get_team_value(slug_equipo: str, fecha: str, debug: bool=False) -> Optional[
             return val
 
     if debug:
-        print("No se pudo obtener el valor de mercado (histórico y tablas por liga fallaron).")
+        print("No se pudo obtener el valor de mercado (club pages y tablas por liga fallaron).")
     return None

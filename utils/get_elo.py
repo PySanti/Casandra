@@ -59,6 +59,7 @@ TEAM_NAME_CANDIDATES = {
     "osa": ["Osasuna", "CA Osasuna"],
     "rvad": ["Real Valladolid", "Valladolid"],
     "spo": ["Sporting Gijon", "Sporting de Gijon", "Sporting de Gijón"],
+    'el' : ['Elche'],
     # Inglaterra
     "mci": ["Man City", "Manchester City"],
     "mun": ["Man United", "Manchester United"],

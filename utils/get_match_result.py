@@ -22,6 +22,7 @@ def slugify_team(name: str) -> str:
     cleaned = _normalize(name)
     aliases = {
         # España
+        "elche":"el",
         "realmadrid":"rma","fcbarcelona":"bar","barcelona":"bar","sevilla":"sev",
         "atleticodemadrid":"atm","atleticomadrid":"atm","valencia":"val","villarreal":"vil",
         "realbetis":"bet","girona":"gir","getafe":"get","realsociedad":"soc",

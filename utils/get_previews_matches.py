@@ -1,53 +1,119 @@
-# utils/get_last_results.py
+# -*- coding: utf-8 -*-
+# utils/get_previus_matches.py
+"""
+Obtiene los X partidos previos a una fecha (dd/mm/aa) para un club
+desde TheSportsDB V1, cruzando todas las competiciones, evitando 429.
+
+Estrategia:
+  1) searchteams.php (con caché en disco para idTeam)
+  2) eventslast.php?id={idTeam}
+  3) eventsseason.php?id={idTeam}&s=YYYY-YYYY (temporada de la fecha y previas) hasta llenar X
+  4) SIN eventsday.php (se elimina el barrido diario que dispara 429)
+
+Devuelve: List[utils.Result.Result] con (home_slug, away_slug, gH, gA, date_obj).
+"""
+
 import re
+import os
+import json
 import time
 import random
-from datetime import datetime, timedelta
-from typing import List, Tuple, Optional
 import unicodedata
-from urllib.parse import quote
-from utils.Result import Result
+from datetime import datetime
+from typing import Optional, List, Dict, Tuple
 
 import requests
 import requests_cache
-from bs4 import BeautifulSoup, Comment
 
-# ---- Cache 24h para no repetir peticiones ----
-requests_cache.install_cache("fb_cache", expire_after=86400)
+from utils.Result import Result
 
-# ---- (Opcional) Mapa de competencias top-5 (no se usa en esta versión, pero lo dejamos por compat) ----
-COMP_MAP = {
-    "laliga": ("12", "La-Liga"),
-    "premier": ("9", "Premier-League"),
-    "seriea": ("11", "Serie-A"),
-    "bundesliga": ("20", "Bundesliga"),
-    "ligue1": ("13", "Ligue-1"),
-}
+# -------------------------------------------------------------------
+# Config
+# -------------------------------------------------------------------
+API_KEY = "123"
+BASE = f"https://www.thesportsdb.com/api/v1/json/{API_KEY}"
+REQ_TIMEOUT = 15
+RATE_MIN_INTERVAL = 0.35   # segundos entre requests (muy conservador)
+MAX_X = 10
+MAX_SEASONS_BACK = 6       # tope de temporadas a mirar hacia atrás
+HTTP_CACHE_NAME = "tsdb_cache"
+HTTP_CACHE_TTL = 86400     # 24h
 
-# ---- UA rotativo / headers ----
-UA = [
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0 Safari/537.36",
-    "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_5) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.6 Safari/605.1.15",
-    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/118.0 Safari/537.36",
+# Cache local para idTeam (persistente en disco)
+TEAM_ID_CACHE_FILE = "tsdb_teams_cache.json"
+_team_cache: Dict[str, Tuple[str, str]] = {}   # slug -> (idTeam, strTeam)
+
+# Cache HTTP 24h
+requests_cache.install_cache(HTTP_CACHE_NAME, expire_after=HTTP_CACHE_TTL)
+
+# -------------------------------------------------------------------
+# HTTP helpers con rate-limit y backoff corto para 429
+# -------------------------------------------------------------------
+_UA = [
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36",
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 13_6) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.5 Safari/605.1.15",
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0 Safari/537.36",
 ]
 def _headers():
     return {
-        "User-Agent": random.choice(UA),
+        "User-Agent": random.choice(_UA),
         "Accept-Language": "en-US,en;q=0.9,es;q=0.8",
-        "Referer": "https://google.com",
+        "Referer": "https://www.thesportsdb.com/",
         "Cache-Control": "no-cache",
         "Pragma": "no-cache",
     }
 
-# ---- Parser HTML (fallback si no hay lxml) ----
-def _pick_parser():
-    try:
-        import lxml  # noqa
-        return "lxml"
-    except Exception:
-        return "html.parser"
+_LAST_TS = 0.0
+def _polite_pause():
+    global _LAST_TS
+    now = time.monotonic()
+    delta = RATE_MIN_INTERVAL - (now - _LAST_TS)
+    if delta > 0:
+        time.sleep(delta + random.uniform(0, 0.05))
+    _LAST_TS = time.monotonic()
 
-# ---- Normalización / slugs de equipos ----
+def _get_json(url: str, debug=False, max_retries=2, total_budget=6.0) -> Optional[dict]:
+    """
+    GET JSON con:
+      - rate limit local
+      - backoff muy corto específico para 429
+      - presupuesto total por llamada para no bloquear
+    """
+    start = time.monotonic()
+    attempt = 0
+    while True:
+        _polite_pause()
+        try:
+            r = requests.get(url, headers=_headers(), timeout=REQ_TIMEOUT)
+            if debug:
+                code = r.status_code
+                from_cache = getattr(r, "from_cache", False)
+                print(f"[TSDB] {code} {'(cache)' if from_cache else ''} {url}")
+            r.raise_for_status()
+            return r.json()
+        except requests.HTTPError as he:
+            status = getattr(he.response, "status_code", None)
+            if status == 429 and attempt < max_retries:
+                # Backoff corto y aleatorio (1.2–2.2s) pero respetando presupuesto total
+                wait = 1.2 + random.uniform(0, 1.0)
+                if time.monotonic() - start + wait > total_budget:
+                    if debug: print("[TSDB][429] presupuesto excedido, abort.")
+                    return None
+                if debug: print(f"[TSDB][429] backoff {wait:.1f}s")
+                time.sleep(wait)
+                attempt += 1
+                continue
+            if debug:
+                print(f"[TSDB][err] {he} @ {url}")
+            return None
+        except Exception as e:
+            if debug:
+                print(f"[TSDB][err] {e} @ {url}")
+            return None
+
+# -------------------------------------------------------------------
+# Normalización / slugs
+# -------------------------------------------------------------------
 def _normalize(s: str) -> str:
     norm = unicodedata.normalize("NFKD", s or "")
     cleaned = "".join(c for c in norm if not unicodedata.combining(c)).lower()
@@ -87,327 +153,223 @@ def slugify_team(name: str) -> str:
     }
     return aliases.get(cleaned, cleaned[:3] if len(cleaned) >= 3 else cleaned)
 
-# ---- Deducción de liga probable por slug (se deja por compat, no se usa en esta versión) ----
-def guess_leagues_for_slug(team_slug: str) -> List[str]:
-    s = team_slug.lower()
-    if s in {"bar","rma","sev","atm","val","vil","bet","gir","get","soc","ath","osa","cel","ray","lpa","ala","gra","rvad","mlr","cad","leg","spo"}:
-        return ["laliga"]
-    if s in {"liv","che","ars","mci","mun","tot","new","whu","avl","eve","lei","bha","bre","bou","cry","ful","wol","for","ips","sou"}:
-        return ["premier"]
-    if s in {"juv","int","mil","nap","rom","laz","ata","fio","tor","bol","gen","sam","cag","emp","udi","mon","lec","sas"}:
-        return ["seriea"]
-    if s in {"bay","bvb","rbl","lev","bmg","vfb","wob","sge","scf","svw","uni","fca","fck"}:
-        return ["bundesliga"]
-    if s in {"psg","om","lyo","mon","lil","nic","ren","nan","monp","gir","rcl","rcs","tou","rei"}:
-        return ["ligue1"]
-    return ["laliga", "premier", "seriea", "bundesliga", "ligue1"]
+# Nombres canónicos para buscar en TheSportsDB a partir del slug
+NAME_BY_SLUG: Dict[str, List[str]] = {
+    "bar": ["FC Barcelona", "Barcelona"],
+    "rma": ["Real Madrid"],
+    "sev": ["Sevilla", "Sevilla FC"],
+    "atm": ["Atlético de Madrid", "Atletico Madrid"],
+    "soc": ["Real Sociedad"],
+    "ath": ["Athletic Club", "Athletic Bilbao"],
+    "bet": ["Real Betis"],
+    "vil": ["Villarreal", "Villarreal CF"],
+    "val": ["Valencia", "Valencia CF"],
+    "cel": ["Celta Vigo", "Celta de Vigo"],
+    "ray": ["Rayo Vallecano"],
+    "gir": ["Girona", "Girona FC"],
+    "get": ["Getafe", "Getafe CF"],
+    "mlr": ["Mallorca", "RCD Mallorca"],
+    "lpa": ["Las Palmas", "UD Las Palmas"],
+    "ala": ["Alaves", "Deportivo Alavés", "Deportivo Alaves"],
+    "gra": ["Granada", "Granada CF"],
+    "osa": ["Osasuna", "CA Osasuna"],
+}
 
-# ---- Rate limit local para evitar 429 ----
-_LAST_CALL_TS = 0.0
-_MIN_INTERVAL = 1.1  # segundos entre requests; puedes ajustar 0.7–1.5
-def _polite_pause():
-    global _LAST_CALL_TS
-    now = time.monotonic()
-    delta = _MIN_INTERVAL - (now - _LAST_CALL_TS)
-    if delta > 0:
-        time.sleep(delta + random.uniform(0, 0.15))
-    _LAST_CALL_TS = time.monotonic()
+def _pick_names_for_slug(slug: str) -> List[str]:
+    if slug in NAME_BY_SLUG:
+        return NAME_BY_SLUG[slug]
+    return [slug]
 
-# ---- GET robusto con caps de espera/presupuesto ----
-def _robust_get(url: str, max_retries=3, base_delay=1.5, max_wait=15, total_budget=30, debug=False) -> requests.Response:
-    """
-    GET con:
-      - rate limit local (_polite_pause)
-      - backoff con límite de espera por intento (max_wait) y presupuesto total (total_budget)
-      - respeta requests_cache si está habilitado
-    """
-    s = requests.Session()
-    start = time.monotonic()
-    for i in range(max_retries):
-        _polite_pause()
-        r = s.get(url, headers=_headers(), timeout=25, allow_redirects=True)
-        if debug:
-            code = r.status_code
-            from_cache = getattr(r, "from_cache", False)
-            print(f"[FBref] {code} {'(cache)' if from_cache else ''} {url}")
-        if r.status_code == 429 or (500 <= r.status_code < 600):
-            ra = r.headers.get("Retry-After")
-            if ra:
-                try:
-                    wait = int(ra)
-                except ValueError:
-                    wait = base_delay * (2 ** i) + random.uniform(0, 1.0)
-            else:
-                wait = base_delay * (2 ** i) + random.uniform(0, 1.0)
-            wait = min(wait, max_wait)
-            elapsed = time.monotonic() - start
-            if elapsed + wait > total_budget:
-                if debug:
-                    print(f"[backoff] presupuesto excedido ({elapsed:.1f}s + {wait:.1f}s) -> skip")
-                break
-            if debug:
-                print(f"[backoff] {r.status_code} -> sleep {wait:.1f}s")
-            time.sleep(wait)
-            continue
-        r.raise_for_status()
-        return r
-    raise RuntimeError(f"Max retries o presupuesto agotado para {url}")
+# -------------------------------------------------------------------
+# Caché en disco para idTeam
+# -------------------------------------------------------------------
+def _load_team_cache():
+    global _team_cache
+    if _team_cache:
+        return
+    if os.path.exists(TEAM_ID_CACHE_FILE):
+        try:
+            with open(TEAM_ID_CACHE_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                # form: {slug: [idTeam, strTeam]}
+                _team_cache = {k: (v[0], v[1]) for k, v in data.items() if isinstance(v, list) and len(v) == 2}
+        except Exception:
+            _team_cache = {}
 
-# ---- Resolución de URL del equipo vía buscador interno de FBref ----
-def _find_team_base_url_via_search(query: str, parser: str, debug: bool=False) -> Optional[str]:
-    """
-    Usa el buscador interno de FBref para dar con la URL base del equipo (/en/squads/<id>/...).
-    Generalmente 1 request; si el buscador redirige, r.url ya es la del equipo.
-    """
-    q = quote(query)
-    url = f"https://fbref.com/en/search/search.fcgi?search={q}"
+def _save_team_cache():
+    if not _team_cache:
+        return
     try:
-        r = _robust_get(url, debug=debug)
-    except Exception as e:
-        if debug: print(f"[search error] {e}")
+        with open(TEAM_ID_CACHE_FILE, "w", encoding="utf-8") as f:
+            json.dump({k: [v[0], v[1]] for k, v in _team_cache.items()}, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+# -------------------------------------------------------------------
+# Resolución de idTeam (con caché persistente)
+# -------------------------------------------------------------------
+def _resolve_team_id(slug_equipo: str, debug: bool=False) -> Optional[Tuple[str, str]]:
+    _load_team_cache()
+    target_slug = slugify_team(slug_equipo)
+    if target_slug in _team_cache:
+        return _team_cache[target_slug]
+
+    candidates = _pick_names_for_slug(target_slug)
+    for name in candidates:
+        url = f"{BASE}/searchteams.php?t={requests.utils.quote(name)}"
+        data = _get_json(url, debug=debug)
+        if not data or not data.get("teams"):
+            continue
+        best = None
+        for t in data["teams"]:
+            nm = t.get("strTeam") or ""
+            if slugify_team(nm) == target_slug:
+                best = t
+                break
+        if not best:
+            best = data["teams"][0]
+        if best and best.get("idTeam"):
+            id_team = best["idTeam"]
+            str_team = best.get("strTeam") or name
+            _team_cache[target_slug] = (id_team, str_team)
+            _save_team_cache()
+            return id_team, str_team
+    return None
+
+# -------------------------------------------------------------------
+# Recolectores de eventos
+# -------------------------------------------------------------------
+def _parse_event_row(ev: dict) -> Optional[Tuple[datetime, str, str, str]]:
+    """
+    Convierte un evento TSDB a (fecha, 'home-away', 'gH-gA', idEvent).
+    """
+    try:
+        date_iso = (ev.get("dateEvent") or "").strip()
+        if not date_iso:
+            return None
+        mdate = datetime.strptime(date_iso, "%Y-%m-%d")
+
+        h = slugify_team(ev.get("strHomeTeam") or "")
+        a = slugify_team(ev.get("strAwayTeam") or "")
+
+        gH = ev.get("intHomeScore")
+        gA = ev.get("intAwayScore")
+        if gH is None or gA is None or str(gH) == "" or str(gA) == "":
+            return None
+
+        score = f"{int(gH)}-{int(gA)}"
+        ide = str(ev.get("idEvent") or f"{h}-{a}-{mdate.date().isoformat()}")
+        return (mdate, f"{h}-{a}", score, ide)
+    except Exception:
         return None
 
-    # Si la búsqueda redirige directamente al equipo:
-    if "/en/squads/" in r.url:
-        return r.url
+def _collect_from_eventslast(id_team: str, cutoff: datetime, need: int, debug=False) -> Dict[str, Tuple[datetime, str, str]]:
+    pool: Dict[str, Tuple[datetime, str, str]] = {}
+    url = f"{BASE}/eventslast.php?id={id_team}"
+    data = _get_json(url, debug=debug)
+    rows = (data or {}).get("results") or (data or {}).get("events") or []
+    parsed = []
+    for ev in rows or []:
+        pr = _parse_event_row(ev)
+        if not pr:
+            continue
+        mdate, ms, sc, ide = pr
+        if mdate < cutoff:
+            parsed.append((mdate, ms, sc, ide))
+    parsed.sort(key=lambda t: t[0], reverse=True)
+    for mdate, ms, sc, ide in parsed:
+        if ide not in pool:
+            pool[ide] = (mdate, ms, sc)
+        if len(pool) >= need:
+            break
+    return pool
 
-    soup = BeautifulSoup(r.text, parser)
-    for a in soup.find_all("a", href=True):
-        h = a["href"]
-        # Evitar jugadores / matchlogs; preferir página raíz del equipo
-        if h.startswith("/en/squads/") and "/players/" not in h and "/matchlogs/" not in h:
-            return "https://fbref.com" + h
-    return None
+def _season_str_for_date(d: datetime) -> str:
+    year = d.year if d.month >= 7 else d.year - 1
+    return f"{year}-{year+1}"
 
-def _resolve_team_base_url(slug_equipo: str, target_slug: str, parser: str, debug: bool=False) -> Optional[str]:
+def _collect_from_eventsseason(id_team: str, season: str, cutoff: datetime, need: int, debug=False) -> Dict[str, Tuple[datetime, str, str]]:
     """
-    Resuelve la URL base del equipo usando el buscador con distintas variantes del query.
-    No usa páginas de liga (evita 429 gigantes de /en/comps/...).
+    Recolecta una temporada concreta, corta en cuanto junta 'need'.
     """
-    # 1) Intento con el slug tal cual (ej. 'bar')
-    by_search = _find_team_base_url_via_search(slug_equipo, parser, debug)
-    if by_search:
-        return by_search
+    pool: Dict[str, Tuple[datetime, str, str]] = {}
+    url = f"{BASE}/eventsseason.php?id={id_team}&s={requests.utils.quote(season)}"
+    data = _get_json(url, debug=debug)
+    rows = (data or {}).get("events") or []
+    parsed = []
+    for ev in rows:
+        pr = _parse_event_row(ev)
+        if not pr:
+            continue
+        mdate, ms, sc, ide = pr
+        if mdate < cutoff:
+            parsed.append((mdate, ms, sc, ide))
+    parsed.sort(key=lambda t: t[0], reverse=True)
+    for mdate, ms, sc, ide in parsed:
+        if ide not in pool:
+            pool[ide] = (mdate, ms, sc)
+        if len(pool) >= need:
+            break
+    return pool
 
-    # 2) Alias comunes por slug
-    reverse_alias = {
-        "bar": ["Barcelona", "FC Barcelona"],
-        "rma": ["Real Madrid", "Real Madrid CF"],
-        "sev": ["Sevilla", "Sevilla FC"],
-        "atm": ["Atlético de Madrid", "Atletico Madrid"],
-        "psg": ["Paris Saint-Germain", "PSG"],
-        "liv": ["Liverpool", "Liverpool FC"],
-        "che": ["Chelsea", "Chelsea FC"],
-        "mci": ["Manchester City", "Man City"],
-        "mun": ["Manchester United", "Man United"],
-        "bvb": ["Borussia Dortmund"],
-        "bay": ["Bayern Munich", "Bayern München", "FC Bayern"],
-        "juv": ["Juventus"],
-        "int": ["Inter", "Internazionale", "Inter Milan"],
-        "mil": ["AC Milan", "Milan"],
-        "nap": ["Napoli", "SSC Napoli"],
-        "rom": ["AS Roma", "Roma"],
-        "laz": ["Lazio", "SS Lazio"],
-    }
-    for q in reverse_alias.get(target_slug, []):
-        by_search = _find_team_base_url_via_search(q, parser, debug)
-        if by_search:
-            return by_search
-
-    # 3) Fallback: slug expandido como texto (p.ej., 'bar' -> 'barcelona')
-    slug_to_text = {
-        "bar": "barcelona",
-        "rma": "real madrid",
-        "sev": "sevilla",
-        "atm": "atletico madrid",
-    }
-    txt = slug_to_text.get(target_slug)
-    if txt:
-        by_search = _find_team_base_url_via_search(txt, parser, debug)
-        if by_search:
-            return by_search
-
-    return None
-
-# ---- Principal ----
+# -------------------------------------------------------------------
+# API principal
+# -------------------------------------------------------------------
 def get_previus_matches(slug_equipo: str, fecha: str, X: int, debug: bool=False) -> List[Result]:
     """
-    Retorna los X resultados previos (antes de 'fecha' dd/mm/aa) del equipo (slug corto)
-    en TODAS las competiciones, usando la página de 'Scores & Fixtures' del equipo en FBref.
-
-    Salida: List[Result] con:
-        Result(home_slug, away_slug, gH, gA, date_obj)
+    Retorna los X resultados previos (antes de 'fecha' dd/mm/aa') para el equipo (slug corto),
+    cruzando todas las competiciones disponibles en TSDB V1. Sin eventsday.php.
     """
-    # --- Validaciones ---
+    # Validaciones
     if not isinstance(X, int) or X <= 0:
         raise ValueError("X debe ser un entero > 0.")
-    X = min(X, 10)  # tope solicitado
+    X = min(X, MAX_X)
 
     try:
-        d_cut = datetime.strptime(fecha, "%d/%m/%y")
+        cutoff = datetime.strptime(fecha, "%d/%m/%y")
     except ValueError:
         raise ValueError("La fecha debe ser dd/mm/aa (ej. '30/09/25').")
 
-    target = slugify_team(slug_equipo)
+    team_slug = slugify_team(slug_equipo)
 
-    # Temporada "año-año+1" (cambio en julio) — solo para ordenar búsqueda de temporadas
-    temporada_base = d_cut.year if d_cut.month >= 7 else d_cut.year - 1
-
-    parser = _pick_parser()
-
-    # ------------------------------------------------------------
-    # 1) Resolver URL base del equipo SIN usar páginas de liga
-    # ------------------------------------------------------------
-    team_base = _resolve_team_base_url(slug_equipo, target, parser, debug)
-    if not team_base:
-        if debug: print("[team] no hallado (search intentos).")
+    # 1) Resolver idTeam (con caché persistente)
+    resolved = _resolve_team_id(slug_equipo, debug=debug)
+    if not resolved:
+        if debug: print("[TSDB] No se pudo resolver idTeam para", slug_equipo)
         return []
+    id_team, team_name = resolved
+    if debug: print(f"[TSDB] Team: {team_name} -> id={id_team}")
 
-    # ------------------------------------------------------------
-    # 2) Hallar URLs de 'Scores & Fixtures' para temporadas cercanas
-    # ------------------------------------------------------------
-    def _find_scores_fixtures_urls(team_root_url: str, seasons: List[int]) -> List[str]:
-        """
-        Dado el root del equipo (/en/squads/<id>/ o una subpágina), localiza los enlaces
-        a 'Scores & Fixtures' para las temporadas solicitadas (más reciente primero).
-        """
-        urls = []
-        try:
-            r = _robust_get(team_root_url, debug=debug)
-        except Exception as e:
-            if debug: print(f"[team_root error] {e}")
-            return urls
+    collected: Dict[str, Tuple[datetime, str, str]] = {}
 
-        soup = BeautifulSoup(r.text, parser)
+    # 2) eventslast (1 request)
+    need = X
+    part = _collect_from_eventslast(id_team, cutoff, need, debug=debug)
+    collected.update(part)
+    if len(collected) >= X:
+        rows = sorted(collected.values(), key=lambda t: t[0], reverse=True)[:X]
+        return [Result(ms.split("-")[0], ms.split("-")[1], *sc.split("-"), dt) for dt, ms, sc in rows]
 
-        a_tags = soup.find_all("a", href=True)
-        hrefs = [(a.get_text(strip=True), a["href"]) for a in a_tags]
+    # 3) seasons: actual y hacia atrás hasta MAX_SEASONS_BACK o completar X
+    season_now = _season_str_for_date(cutoff)
+    try:
+        y0 = int(season_now.split("-")[0])
+    except Exception:
+        y0 = cutoff.year
 
-        def _to_abs(h: str) -> str:
-            return "https://fbref.com" + h if h.startswith("/") else h
-
-        for year in seasons:
-            season_str = f"{year}-{year+1}"
-            cand = None
-            for text, h in hrefs:
-                txt = (text or "").lower()
-                href_l = h.lower()
-                # Buscamos "Scores & Fixtures" o variantes, que contengan la temporada
-                if "scores" in txt and "fixture" in txt and season_str in href_l:
-                    cand = _to_abs(h); break
-                # Fallback por patrones de href conocidos
-                if season_str in href_l and ("matchlogs" in href_l or "schedule" in href_l):
-                    cand = _to_abs(h); break
-            if cand:
-                urls.append(cand)
-
-        # Fallback: si no hay temporada explícita, toma el primer "Scores & Fixtures"
-        if not urls:
-            for text, h in hrefs:
-                txt = (text or "").lower()
-                if "scores" in txt and "fixture" in txt:
-                    urls.append(_to_abs(h))
-                    break
-
-        return urls
-
-    # Intentamos temporada base y retrocedemos (limitar a 4 temporadas para bajar carga)
-    seasons_to_try = [temporada_base - i for i in range(0, 4)]  # base..base-3
-    team_sf_urls = _find_scores_fixtures_urls(team_base, seasons_to_try)
-    if not team_sf_urls:
-        if debug: print("[scores&fixtures] no encontrado")
-        return []
-
-    # ------------------------------------------------------------
-    # 3) Parsear cada tabla de 'Scores & Fixtures' (todas comps) y recolectar previos a d_cut
-    # ------------------------------------------------------------
-    collected: List[Tuple[datetime, str, str]] = []  # (date, 'home-away', 'gH-gA')
-
-    def _parse_scores_fixtures(url: str):
-        nonlocal collected
-        try:
-            r = _robust_get(url, debug=debug)
-        except Exception as e:
-            if debug: print(f"[sf error] {e} @ {url}")
-            return
-
-        soup = BeautifulSoup(r.text, parser)
-
-        def _iter_rows(s):
-            for tr in s.select("table tbody tr"):
-                yield tr
-
-        rows = list(_iter_rows(soup))
-        if not rows:
-            for c in soup.find_all(string=lambda t: isinstance(t, Comment) and "<table" in t):
-                sub = BeautifulSoup(c, parser)
-                rows = list(_iter_rows(sub))
-                if rows:
-                    break
-
-        for tr in rows:
-            date_td = tr.find("td", {"data-stat": "date"})
-            home_td = tr.find("td", {"data-stat": "home_team"})
-            away_td = tr.find("td", {"data-stat": "away_team"})
-            score_td = tr.find("td", {"data-stat": "score"})
-            if not (date_td and home_td and away_td and score_td):
-                continue
-
-            # Fecha
-            raw = (date_td.get_text(strip=True) or "")[:10]
-            try:
-                mdate = datetime.strptime(raw, "%Y-%m-%d")
-            except Exception:
-                continue
-
-            if not (mdate < d_cut):
-                continue  # solo previos
-
-            # Equipos
-            h_name = home_td.get_text(strip=True)
-            a_name = away_td.get_text(strip=True)
-            h = slugify_team(h_name)
-            a = slugify_team(a_name)
-
-            # Confirmar que uno de los dos es nuestro equipo objetivo
-            if h != target and a != target:
-                continue
-
-            # Marcador
-            score = score_td.get_text(strip=True)
-            if not score:
-                continue
-            score = re.sub(r"\s*–\s*", "-", score)  # normaliza guion
-            if not re.match(r"^\d+\s*-\s*\d+$", score):  # evitar "Postp", "AET", etc., si cambian formato
-                continue
-
-            collected.append((mdate, f"{h}-{a}", score))
-
-    # Parseamos urls en orden (más recientes primero)
-    for u in team_sf_urls:
-        _parse_scores_fixtures(u)
-        if len(collected) >= X:
+    seasons = [f"{y0-i}-{y0-i+1}" for i in range(0, MAX_SEASONS_BACK)]
+    for s in seasons:
+        need = X - len(collected)
+        if need <= 0:
             break
+        part = _collect_from_eventsseason(id_team, s, cutoff, need, debug=debug)
+        collected.update(part)
 
-    # Si aún no alcanza X, intenta temporadas adicionales no cubiertas (por si faltó algún enlace)
-    if len(collected) < X:
-        extra_years = [y for y in seasons_to_try if all(str(y) not in u for u in team_sf_urls)]
-        for y in extra_years:
-            more_urls = _find_scores_fixtures_urls(team_base, [y])
-            for u in more_urls:
-                _parse_scores_fixtures(u)
-                if len(collected) >= X:
-                    break
-            if len(collected) >= X:
-                break
-
-    # ------------------------------------------------------------
-    # 4) Ordenar desc por fecha y cortar a X → construir Result
-    # ------------------------------------------------------------
-    collected.sort(key=lambda t: t[0], reverse=True)
+    # 4) Ordenar y cortar (sin fallback de días para evitar 429)
+    rows = sorted(collected.values(), key=lambda t: t[0], reverse=True)[:X]
     out: List[Result] = []
-    for date_obj, match_slug, score in collected[:X]:
-        h_slug, a_slug = match_slug.split("-")
-        gH, gA = score.split("-")
-        out.append(Result(h_slug, a_slug, gH, gA, date_obj))
+    for dt, ms, sc in rows:
+        h, a = ms.split("-")
+        gH, gA = sc.split("-")
+        out.append(Result(h, a, gH, gA, dt))
     return out
