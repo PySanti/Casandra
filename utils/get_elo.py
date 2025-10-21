@@ -1,4 +1,4 @@
-# utils/get_team_elo.py
+# utils/get_elo.py
 import csv
 import io
 import re
@@ -43,7 +43,7 @@ def _norm(s: str) -> str:
     return re.sub(r"[^a-z0-9]+", "", s)
 
 def _tokens(s: str) -> List[str]:
-    """Tokens alfabéticos sin acentos y en minúscula."""
+    """Tokens alfanuméricos sin acentos y en minúscula."""
     s = _strip_accents(s or "").lower()
     return re.findall(r"[a-z0-9]+", s)
 
@@ -68,10 +68,10 @@ def _alias_variants_from_name(team_name: str) -> List[str]:
     """
     Genera variantes útiles del nombre recibido:
     - original
-    - sin palabras genéricas (FC, CF, Club, de…)
-    - sin paréntesis, sin sufijos tipo 'SAD'
-    - invertir orden si parece 'Club Ciudad' -> 'Ciudad'
-    - abreviaciones habituales (Man City, Man United, PSG, etc.) incluidas en MAP opcional
+    - sin paréntesis, colapsar espacios
+    - tokens con/sin genéricos
+    - últimas DOS palabras (evitar la última sola)
+    - algunos reemplazos frecuentes
     """
     base = (team_name or "").strip()
     out: List[str] = []
@@ -81,7 +81,7 @@ def _alias_variants_from_name(team_name: str) -> List[str]:
     # 1) original
     out.append(base)
 
-    # 2) sin paréntesis y contenido dentro
+    # 2) sin paréntesis
     no_par = re.sub(r"\s*\([^)]*\)\s*", " ", base).strip()
     if no_par and no_par != base:
         out.append(no_par)
@@ -90,24 +90,20 @@ def _alias_variants_from_name(team_name: str) -> List[str]:
     base2 = re.sub(r"\s+", " ", no_par).strip()
     out.append(base2)
 
-    # 4) eliminar palabras genéricas
+    # 4) variantes tokenizadas
     toks = _tokens(base2)
     toks_clean = [t for t in toks if t not in _WORDS_TO_DROP]
     if toks_clean:
         out.append(" ".join(toks_clean))
 
-    # 5) variantes con y sin artículos/preposiciones 'de', 'la', etc.
-    out.append(" ".join(_tokens(base2)))  # solo tokens simples
-    out.append(" ".join(toks_clean))
+    out.append(" ".join(_tokens(base2)))   # solo tokens simples
+    out.append(" ".join(toks_clean))       # sin genéricos (dedupe abajo)
 
-    # 6) si el nombre comienza con algo tipo 'Club/C.F./F.C.' seguido de 'Ciudad'
-    #    quedarnos también con la última palabra(s)
-    if len(toks_clean) >= 1:
-        out.append(toks_clean[-1])
+    # 5) últimas DOS palabras (no una) para evitar colisiones por un único token
     if len(toks_clean) >= 2:
-        out.append(" ".join(toks_clean[-2:]))
+        out.append(" ".join(toks_clean[-4:]))
 
-    # 7) reemplazos frecuentes
+    # 6) reemplazos frecuentes
     rep = [
         (r"\bmunich\b", "munchen"),
         (r"\bkoln\b", "koln"),
@@ -192,12 +188,12 @@ def _row_club_name(row: dict) -> Optional[str]:
 # ---------- Matching ----------
 def _best_row_for_team(rows: List[dict], name_variants: List[str], debug: bool=False) -> Optional[dict]:
     """
-    Selecciona la mejor fila de 'rows' cuyo club coincida con alguna de las variantes del nombre.
-    Estrategia:
-      1) match exacto por _norm
-      2) prefix/suffix match por _norm
-      3) similitud Jaccard de tokens limpios (umbral >= 0.6)
-      4) mejor similitud global si >= 0.5
+    Coincidencia estricta para evitar falsos positivos:
+      1) exacto por _norm
+      2) v_tok ⊆ c_tok (subconjunto de tokens)
+      3) prefijo/sufijo SOLO si ambos tienen ≥2 tokens y v_tok ⊆ c_tok
+      4) Jaccard >= 0.67 y |intersección| >= 2
+    (No hay fallback 'mejor>=0.5')
     """
     if not rows or not name_variants:
         return None
@@ -222,43 +218,48 @@ def _best_row_for_team(rows: List[dict], name_variants: List[str], debug: bool=F
                 if debug: print(f"[match-exact] '{c}' == '{_orig}'")
                 return r
 
-    # 2) prefix/suffix por _norm (p.ej., 'athleticbilbao' vs 'athleticclub')
-    for r, c, c_norm, _ in clubs:
-        for vn, _, _orig in variants_norm:
-            if not c_norm or not vn:
-                continue
-            if c_norm.startswith(vn) or vn.startswith(c_norm):
-                if debug: print(f"[match-prefix] '{c}' ~ '{_orig}'")
-                return r
-
-    # 3) Jaccard >= 0.6
-    best: Tuple[float, dict] = (0.0, None)  # (score, row)
+    # 2) Subconjunto de tokens: todos los tokens del query están en el club
+    subset_candidates: List[Tuple[int, dict]] = []  # (len(c_tok), row) para preferir club con más detalle
     for r, c, _, c_tok in clubs:
+        for _, v_tok, _orig in variants_norm:
+            if v_tok and v_tok.issubset(c_tok):
+                subset_candidates.append((len(c_tok), r))
+                if debug: print(f"[match-subset] '{c}' ⊇ query_tokens")
+                break
+    if subset_candidates:
+        subset_candidates.sort(key=lambda t: t[0], reverse=True)  # preferir el más específico
+        return subset_candidates[0][1]
+
+    # 3) Prefijo/sufijo PERO solo si ambos tienen ≥2 tokens y v_tok ⊆ c_tok
+    for r, c, c_norm, c_tok in clubs:
+        if len(c_tok) < 2:
+            continue
         for vn, v_tok, _orig in variants_norm:
-            score = _jaccard(c_tok, v_tok)
-            if score >= 0.6:
-                if debug: print(f"[match-jaccard>=0.6] '{c}' ~ '{_orig}' -> {score:.2f}")
+            if len(v_tok) < 2 or not c_norm or not vn:
+                continue
+            if v_tok.issubset(c_tok) and (c_norm.startswith(vn) or vn.startswith(c_norm)):
+                if debug: print(f"[match-prefix-subset] '{c}' ~ subset+prefix")
                 return r
-            if score > best[0]:
-                best = (score, r)
 
-    # 4) mejor similitud si >= 0.5
-    if best[1] is not None and best[0] >= 0.5:
-        if debug:
-            c_name = _row_club_name(best[1]) or "?"
-            print(f"[match-best>=0.5] '{c_name}' -> {best[0]:.2f}")
-        return best[1]
+    # 4) Jaccard robusto: requiere bastante solapamiento de tokens
+    for r, c, _, c_tok in clubs:
+        for _, v_tok, _orig in variants_norm:
+            inter = len(c_tok & v_tok)
+            score = _jaccard(c_tok, v_tok)
+            if inter >= 2 and score >= 0.67:
+                if debug: print(f"[match-jaccard>=0.67 & inter>=2] '{c}' -> {score:.2f}")
+                return r
 
+    # Sin match estricto -> None
+    if debug:
+        print("[no-match] Rechazado para evitar falsos positivos.")
     return None
 
 # ---------- API principal ----------
 def get_team_elo(team_name: str, fecha: str, back_days: int = 3, debug: bool=False) -> Optional[Tuple[int, int]]:
     """
     Devuelve (ranking, elo) del equipo (por NOMBRE) en la fecha dada 'dd/mm/aa'.
-    Estrategia:
-      - Construye variantes del nombre (alias heurísticos).
-      - Descarga CSV de ClubElo del día y, si no aparece, retrocede hasta `back_days`.
-      - Calcula ranking por Elo del día y devuelve (rank, int(elo)).
+    Usa matching estricto para no confundir equipos diferentes que comparten una palabra.
     """
     # 1) Fecha -> YYYY-MM-DD
     try:
@@ -309,7 +310,7 @@ def get_team_elo(team_name: str, fecha: str, back_days: int = 3, debug: bool=Fal
                 rank_map[_norm(club)] = idx
             flat_rows.append(r)
 
-        # matching robusto
+        # matching robusto (estricto)
         row = _best_row_for_team(flat_rows, variants, debug=debug)
         if row:
             elo_val = _extract_elo(row)
@@ -326,4 +327,3 @@ def get_team_elo(team_name: str, fecha: str, back_days: int = 3, debug: bool=Fal
     if debug:
         print("No se encontró Elo/ranking para ese equipo en la ventana indicada.")
     return None
-
