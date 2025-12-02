@@ -3,7 +3,7 @@
 """
 Obtiene el valor de mercado de un equipo (Transfermarkt) en una fecha dada.
 Entrada:
-  - slug_equipo: str  (p.ej., 'sev', 'bar', 'mci', 'psg' ...)
+  - nombre_equipo: str  (p.ej., 'Sevilla FC', 'FC Barcelona', 'Manchester City', 'PSG' ...)
   - fecha: 'dd/mm/aa'
   - liga:  hint ['laliga'|'premier'|'seriea'|'bundesliga'|'ligue1'] o ''/None
 Salida:
@@ -12,12 +12,13 @@ Cobertura:
   - Top-5 ligas europeas (1ª, 2ª y 3ª división)
   - Fechas 1995–2025 (vía páginas vigentes y Wayback Machine)
 Estrategia:
-  1) Resolver tm_id a partir del slug (caché + scraping de tablas 1–3)
-  2) Intentar páginas del club (varias rutas y dominios):
+  1) Derivar un slug interno a partir del nombre completo del equipo.
+  2) Resolver tm_id a partir de ese slug (caché + scraping de tablas 1–3)
+  3) Intentar páginas del club (varias rutas y dominios):
        - Serie Highcharts (histórico exacto) o literal "Total market value"
        - Si no hay versión viva, intentar Wayback ≤ 24 meses atrás
-  3) Fallback: tablas por liga (live; si no, Wayback por mes) y localizar el club
-  4) Cachear por (slug|YYYYMM)
+  4) Fallback: tablas por liga (live; si no, Wayback por mes) y localizar el club
+  5) Cachear por (slug|YYYYMM)
 """
 
 import re
@@ -675,13 +676,13 @@ def _cache_key(slug: str, dt: datetime) -> str:
 # ============================
 # API principal
 # ============================
-def get_team_value(slug_equipo: str, fecha: str, liga: Optional[str] = None, debug: bool=False) -> Optional[str]:
+def get_team_value(nombre_equipo: str, fecha: str, liga: Optional[str] = None, debug: bool=False) -> Optional[str]:
     """
     Devuelve el valor de mercado del equipo (p.ej., '€1.11bn' o '€462.10m')
     para la fecha (dd/mm/aa), soportando 1ª–3ª división de las 5 grandes ligas y 1995–2025.
 
     Parámetros:
-      - slug_equipo: str (p.ej. 'sev', 'bar', 'mci', 'psg')
+      - nombre_equipo: str (p.ej. 'Sevilla FC', 'FC Barcelona', 'Manchester City', 'PSG')
       - fecha: 'dd/mm/aa'
       - liga: 'laliga'|'premier'|'seriea'|'bundesliga'|'ligue1' o None/'' (hint para acotar scraping)
       - debug: bool
@@ -700,9 +701,14 @@ def get_team_value(slug_equipo: str, fecha: str, liga: Optional[str] = None, deb
     if target.year > 2025:
         target = datetime(2025, min(target.month, 12), 28)
 
-    slug = (slug_equipo or "").lower().strip()
+    team_name = (nombre_equipo or "").strip()
+    if not team_name:
+        raise ValueError("nombre_equipo inválido.")
+
+    # Derivar slug interno a partir del nombre completo
+    slug = slugify_team(team_name)
     if not slug or len(slug) < 2:
-        raise ValueError("slug_equipo inválido.")
+        raise ValueError("No se pudo derivar un slug válido a partir de nombre_equipo.")
 
     _load_value_cache()
     ck = _cache_key(slug, target)
